@@ -1,5 +1,4 @@
 ﻿using Bejo.DistributedCollections.Network;
-using Xunit;
 using FluentAssertions;
 using System.Net.Sockets;
 using System.Text;
