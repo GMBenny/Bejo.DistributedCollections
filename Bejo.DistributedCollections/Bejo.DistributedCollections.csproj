@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+
+    <PackageId>Bejo.DistributedCollections</PackageId>
+    <Version>0.0.1</Version>
+    <Authors>Benny Jørgensen</Authors>
+    <Description>A distributed data collection.</Description>
+    <PackageTags>distributed;collections;dictionary;key-value</PackageTags>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+</Project>
