@@ -1,6 +1,8 @@
 ﻿using Bejo.DistributedCollections.Network;
 using Xunit;
 using FluentAssertions;
+using System.Net.Sockets;
+using System.Text;
 
 namespace Bejo.DistributedCollections_Tests;
 
@@ -33,7 +35,6 @@ public class ClientServerTest
     {
         var c = new Client("localhost", 10001, 3, new TimeSpan(0, 0, 2));
 
-        var r = await c.SendAsync(System.Text.Encoding.UTF8.GetBytes($"0:5"));
-
+        await Assert.ThrowsAsync<SocketException>(async () => await c.SendAsync(Encoding.UTF8.GetBytes("0:5")));
     }
 }
