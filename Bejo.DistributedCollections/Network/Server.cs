@@ -11,13 +11,17 @@ internal class Server
 
     private readonly int _port;
     private TcpListener? _listener;
-   
+    private readonly bool _compress;
+    private readonly List<string> _passwords;
+
     private readonly Func<byte[], byte[]> _handleRequest;
 
-    internal Server(int port, Func<byte[], byte[]> handleRequest)
+    internal Server(int port, bool compress, List<string> passwords, Func<byte[], byte[]> handleRequest)
     {
         _port = port;
         _handleRequest = handleRequest;
+        _compress = compress;
+        _passwords = passwords;
     }
 
     internal async Task StartAsync(CancellationToken cancellationToken = default)
@@ -74,6 +78,24 @@ internal class Server
 
                     if (message == null)
                         break;
+
+                    if(_passwords != null && _passwords.Count > 0)
+                    {
+                        foreach (var password in _passwords)
+                        {
+                            var messageDecrypted = Helpers.Helper.Decrypt(message, password);
+                            if (messageDecrypted != null)
+                            {
+                                message = messageDecrypted;
+                                break;
+                            }
+                        }
+                        if (message == null)
+                            throw new UnauthorizedAccessException("Failed to decrypt message with provided passwords.");
+                    }
+
+                    if(_compress)
+                        message = Helpers.Helper.Decompress(message);
 
                     var response = _handleRequest(message);
 

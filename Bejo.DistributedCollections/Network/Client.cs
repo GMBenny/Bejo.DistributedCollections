@@ -18,17 +18,32 @@ internal class Client : IDisposable
     private readonly int _retryCount;
     private readonly TimeSpan _timeout;
 
+    // Compression and encryption settings
+    private readonly bool _compress;
+    private readonly string? _password;
 
-    internal Client(string host, int port, int retryCount, TimeSpan timeout)
+
+    internal Client(string host, int port, int retryCount, TimeSpan timeout, bool compress, string? password)
     {
         _host = host;
         _port = port;
         _retryCount = retryCount;
         _timeout = timeout;
+        _compress = compress;
+        _password = password;
     }
 
     internal async Task<byte[]> SendAsync(byte[] message, CancellationToken cancellationToken = default)
     {
+        if (_compress)
+        {
+            message = Helpers.Helper.Compress(message);
+        }
+        if (!string.IsNullOrWhiteSpace(_password))
+        {
+            message = Helpers.Helper.Encrypt(message, _password);
+        }
+
         await _sendLock.WaitAsync(cancellationToken);
 
         try

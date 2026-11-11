@@ -12,7 +12,7 @@ public class ProtocolTest
     {
         var protocolServer = new Protocol();
 
-        var server = new Server(10002, protocolServer.MessageHandler);
+        var server = new Server(10002, true, new List<string>{ "abc123abc", "123454321"}, protocolServer.MessageHandler);
         Task.Run(async () => { await server.StartAsync(); });
 
         do
@@ -20,14 +20,14 @@ public class ProtocolTest
             await Task.Delay(25);
         } while (server.State != Server.ServerState.started);
 
-        var protocolClient = new Protocol("localhost", 10002, 3, new TimeSpan(0, 0, 2));
+        var protocolClient = new Protocol("localhost", 10002, 3, new TimeSpan(0, 0, 2), true, "123454321");
     }
 
     [Fact]
     public async Task SendPing()
     {
         var protocolServer = new Protocol();
-        var server = new Server(10003, protocolServer.MessageHandler);
+        var server = new Server(10003, true, new List<string>{ "abc123abc", "123454321"}, protocolServer.MessageHandler);
         Task.Run(async () => { await server.StartAsync(); });
 
         do
@@ -35,7 +35,7 @@ public class ProtocolTest
             await Task.Delay(25);
         } while (server.State != Server.ServerState.started);
 
-        var protocolClient = new Protocol("localhost", 10003, 3, new TimeSpan(0, 0, 2));
+        var protocolClient = new Protocol("localhost", 10003, 3, new TimeSpan(0, 0, 2), true, "123454321");
         var networkStat = await protocolClient.SendPing();
                
         networkStat.LastStatus.Should().Be(NetworkStatus.Online);
@@ -46,7 +46,7 @@ public class ProtocolTest
     public async Task ReverseMessageWithHashCheck()
     {
         var protocolServer = new Protocol();
-        var server = new Server(10004, protocolServer.MessageHandler);
+        var server = new Server(10004, true, new List<string>{ "abc123abc", "123454321"}, protocolServer.MessageHandler);
         Task.Run(async () => { await server.StartAsync(); });
 
         do
@@ -54,7 +54,7 @@ public class ProtocolTest
             await Task.Delay(25);
         } while (server.State != Server.ServerState.started);
 
-        var protocolClient = new Protocol("localhost", 10004, 3, new TimeSpan(0, 0, 2));
+        var protocolClient = new Protocol("localhost", 10004, 3, new TimeSpan(0, 0, 2),true, "123454321");
 
         var message = "Der var engang i lille gris";
         

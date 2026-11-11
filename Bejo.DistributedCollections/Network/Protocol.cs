@@ -1,8 +1,4 @@
-
-
-
 using System.Diagnostics;
-using System.Security.Cryptography;
 using System.Text;
 
 namespace Bejo.DistributedCollections.Network;
@@ -12,9 +8,9 @@ internal class Protocol
     private readonly Client? _client;
 
     // Constructor for Clients
-    internal Protocol(string host, int port, int retryCount, TimeSpan timeout)
+    internal Protocol(string host, int port, int retryCount, TimeSpan timeout, bool compress, string? password)
     {
-        _client = new Client(host, port, retryCount, timeout);
+        _client = new Client(host, port, retryCount, timeout, compress, password);
     }
 
     // Constructor for Servers

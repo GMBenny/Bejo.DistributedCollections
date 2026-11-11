@@ -3,7 +3,7 @@ using Bejo.DistributedCollections.Network;
 
 Console.WriteLine("Starting server...");
 
-var s = new Server(12345, message => message.Reverse().ToArray());
+var s = new Server(12345, true, new List<string>{ "abc123abc", "123454321"}, message => message.Reverse().ToArray());
 
 Task.Run(async () => await s.StartAsync());
 //await s.StartAsync(); // Blocking kald
@@ -18,7 +18,7 @@ do
 
 Console.WriteLine("Server started.");
 
-var c = new Client("localhost", 12345, 3, new TimeSpan(0, 0, 2));
+var c = new Client("localhost", 12345, 3, new TimeSpan(0, 0, 2), true, "123454321");
 
 for(int i = 0; i < 4; i++)
 {
