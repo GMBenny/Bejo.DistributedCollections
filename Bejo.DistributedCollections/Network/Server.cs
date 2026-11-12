@@ -11,13 +11,17 @@ internal class Server
 
     private readonly int _port;
     private TcpListener? _listener;
-   
+    private readonly bool _compress;
+    private readonly List<string>? _passwords;
+
     private readonly Func<byte[], byte[]> _handleRequest;
 
-    internal Server(int port, Func<byte[], byte[]> handleRequest)
+    internal Server(int port, bool compress, List<string>? passwords, Func<byte[], byte[]> handleRequest)
     {
         _port = port;
         _handleRequest = handleRequest;
+        _compress = compress;
+        _passwords = passwords;
     }
 
     internal async Task StartAsync(CancellationToken cancellationToken = default)
@@ -70,14 +74,54 @@ internal class Server
 
                 while (!cancellationToken.IsCancellationRequested)
                 {
+                    // Afvent og læs beskred fra client
                     var message = await NetworkMessageFraming.ReadAsync(stream, cancellationToken);
 
                     if (message == null)
-                        break;
+                    {
+                        break;  // Luk forbindelsen til klienten ved at bryde while loopet
+                    }
+                    else
+                    {
+                        // Hvis der er valgt at kryptere, så forsøg at dekryptere beskeden.
+                        if(_passwords != null && _passwords.Count > 0)
+                        {
+                            byte[]? messageDecrypted = null;
 
-                    var response = _handleRequest(message);
+                            int i =0;
+                            do
+                            {
+                                messageDecrypted = Helpers.Helper.Decrypt(message, _passwords[i]);
+                                if (messageDecrypted != null)
+                                    message = messageDecrypted;
+                                else
+                                    i++;
+                            } while (messageDecrypted == null && i < _passwords.Count);
 
-                    await NetworkMessageFraming.WriteAsync(stream, response, cancellationToken);
+                            // Hvis dekrypteringen fejler, send en fejlbesked til klienten.
+                            if (messageDecrypted == null)
+                            {
+                                message = null;
+                                await NetworkMessageFraming.WriteAsync(stream, System.Text.Encoding.UTF8.GetBytes("Failed to decrypt message."), cancellationToken);
+                            }
+                        }
+
+                        // Hvis der er valgt at komprimere, så dekomprimer beskeden.
+                        if(_compress && message != null)
+                        {
+                            message = Helpers.Helper.Decompress(message);
+
+                            // Hvis dekomprimeringen fejler, send en fejlbesked til klienten.
+                            if (message == null)
+                                await NetworkMessageFraming.WriteAsync(stream, System.Text.Encoding.UTF8.GetBytes("Failed to decompress message."), cancellationToken);
+                        }
+
+                        if (message != null) {
+                            var response = _handleRequest(message);
+
+                            await NetworkMessageFraming.WriteAsync(stream, response, cancellationToken);
+                        }
+                    }
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
