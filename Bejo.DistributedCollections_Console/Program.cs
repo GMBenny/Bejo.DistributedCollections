@@ -17,6 +17,22 @@ var rs = new Bejo.DistributedCollections.ReplicationSet(
 var myDictionary = rs.GetOrCreateDistributedDictionary<int, string>("myDictionary");
 
 
+myDictionary.Add(1, "one");
+myDictionary.Add(2, "two");
+
+foreach (var item in myDictionary)
+{
+    Console.WriteLine($"Key: {item.Key}, Value: {item.Value}");
+}
+
+
+
+
+Console.WriteLine("Press any key to exit...");
+Console.ReadKey();
+
+
+
 /*
 Console.WriteLine("Starting server...");
 

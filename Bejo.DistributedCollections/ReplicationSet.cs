@@ -9,19 +9,18 @@ namespace Bejo.DistributedCollections;
 // Ansvarlig for at modtage settings og oprette data collections
 public class ReplicationSet
 {
-    private readonly ReplicationSetSettings _replicationSetSettings;
+    //private readonly ReplicationSetSettings _replicationSetSettings;
     private readonly Dictionary<string, IDistributedCollection> _distributedCollections = new();
     private readonly ReplicationManager _replicationManager;
 
     public ReplicationSet(ReplicationSetSettings replicationSetSettings)
     {
-        _replicationSetSettings = replicationSetSettings;
+        //--_replicationSetSettings = replicationSetSettings;
         _replicationManager = new ReplicationManager(replicationSetSettings);
     }
 
 
-    public IDictionary<TKey, TValue> GetOrCreateDistributedDictionary<TKey, TValue>(string name)
-        where TKey : notnull
+    public IDictionary<TKey, TValue> GetOrCreateDistributedDictionary<TKey, TValue>(string name) where TKey : notnull
     {
         var keyType = typeof(TKey);
         if (!keyType.IsPrimitive && !keyType.IsEnum && keyType != typeof(string) &&

@@ -5,8 +5,7 @@ using Bejo.DistributedCollections.Network;
 
 namespace Bejo.DistributedCollections.Dictionary;
 
-internal class DistributedCollectionNode<TKey, TValue>(ReplicationManager replicationManager)
-    where TKey : notnull
+internal class DistributedCollectionNode<TKey, TValue>(ReplicationManager replicationManager) where TKey : notnull
 {
     private readonly ConcurrentDictionary<TKey, TValue> _dictionaryReplica = new();
 
