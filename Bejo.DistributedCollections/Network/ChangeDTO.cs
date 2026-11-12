@@ -1,8 +1,10 @@
 ﻿namespace Bejo.DistributedCollections.Network;
 
-internal enum ChangeType { Ignored = 0, Added = 1, Updated = 2, Removed = 3, ClearCollection = 9 }
+internal enum ChangeType { Ignored = 0, CreateCollection = 1, AddUpdated = 2, Removed = 3, ClearCollection = 4, RemoveCollection = 5 }
 internal class ChangeDTO
 {
+    public string CollectionName { get; private set; }
+
     public string JsonObject { get; private set; }
 
     public ChangeType Action { get; private set; }
@@ -10,8 +12,9 @@ internal class ChangeDTO
     public ulong FromValueHash { get; private set; }
     public ulong ToValueHash { get; private set; }
 
-    public ChangeDTO(string jsonObject, ChangeType action, ulong fromValueHash, ulong toValueHash)
+    public ChangeDTO(string collectionName, string jsonObject, ChangeType action, ulong fromValueHash, ulong toValueHash)
     {
+        CollectionName = collectionName;
         JsonObject = jsonObject;
         Action = action;
         FromValueHash = fromValueHash;

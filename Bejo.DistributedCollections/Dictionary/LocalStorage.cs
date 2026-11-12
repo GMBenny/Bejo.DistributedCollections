@@ -1,4 +1,6 @@
-﻿namespace Bejo.DistributedCollections.Dictionary;
+﻿using System.Text.Json;
+
+namespace Bejo.DistributedCollections.Dictionary;
 
 internal class LocalStorage<TKey, TValue>
 {
@@ -15,7 +17,7 @@ internal class LocalStorage<TKey, TValue>
     {
         _dataObject = new DataObject(key, value, DateTime.UtcNow);
 
-        JsonString = System.Text.Json.JsonSerializer.Serialize(_dataObject);
+        JsonString = JsonSerializer.Serialize(_dataObject);
         ValueHash = Helpers.Helper.Hash(JsonString);
     }
 

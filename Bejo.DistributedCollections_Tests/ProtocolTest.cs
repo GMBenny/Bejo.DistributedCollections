@@ -35,7 +35,7 @@ public class ProtocolTest
         } while (server.State != Server.ServerState.started);
 
         var protocolClient = new Protocol("localhost", 10003, 3, new TimeSpan(0, 0, 2), true, "123454321");
-        var networkStat = await protocolClient.SendPing();
+        var networkStat = await protocolClient.SendPingAsync();
                
         networkStat.LastStatus.Should().Be(NetworkStatus.Online);
         networkStat.RoundtripTime.Should().BeLessThan(TimeSpan.FromSeconds(2));

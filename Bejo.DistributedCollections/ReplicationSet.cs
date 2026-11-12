@@ -2,6 +2,7 @@
 
 using Bejo.DistributedCollections.Dictionary;
 using Bejo.DistributedCollections.Network;
+using System.Text.Json;
 
 namespace Bejo.DistributedCollections;
 
@@ -16,9 +17,8 @@ public class ReplicationSet
     public ReplicationSet(ReplicationSetSettings replicationSetSettings)
     {
         //--_replicationSetSettings = replicationSetSettings;
-        _replicationManager = new ReplicationManager(replicationSetSettings);
+        _replicationManager = new ReplicationManager(replicationSetSettings, _distributedCollections);
     }
-
 
     public IDictionary<TKey, TValue> GetOrCreateDistributedDictionary<TKey, TValue>(string name) where TKey : notnull
     {
@@ -46,9 +46,17 @@ public class ReplicationSet
         }
 
         // If it does not exist, create a new distributed dictionary
-        var node = new DistributedCollectionNode<TKey, LocalStorage<TKey, TValue>>(name, _replicationManager);
+        var node = new DistributedCollectionNode<TKey, TValue>(name, _replicationManager);
         var distributedDictionary = new DistributedDictionary<TKey, TValue>(node);
         _distributedCollections.Add(name, distributedDictionary);
+
+        var typeInfo = JsonSerializer.Serialize(new
+        {
+            CollectionType = "DistributedDictionary",
+            KeyType = typeof(TKey).AssemblyQualifiedName,
+            ValueType = typeof(TValue).AssemblyQualifiedName
+        });
+        _replicationManager.SendCommand(new ChangeDTO(name, typeInfo, ChangeType.CreateCollection, 0, 0));
 
         return distributedDictionary;
     }

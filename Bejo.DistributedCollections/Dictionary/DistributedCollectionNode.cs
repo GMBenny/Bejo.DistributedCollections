@@ -12,17 +12,29 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationM
 
     internal ICollection<TValue> Values => _dictionaryReplica.Values.Select(v => v.Value).ToList();
 
-    internal bool TryCreate(TKey key, TValue value)
+    internal bool TryCreateUpdate(TKey key, TValue value)
     {
         var localValue = new LocalStorage<TKey, TValue>(key, value);
 
-        var createResult = _dictionaryReplica.TryAdd(key, localValue);
+        // If the key already exists, we update it and send a replication command
+        if (_dictionaryReplica.TryGetValue(key, out var existingValue))
+        {
+            replicationManager.SendCommand(new ChangeDTO(name, localValue.JsonString, ChangeType.AddUpdated, existingValue.ValueHash, localValue.ValueHash));
 
-        // If local change was a success, then replicate the change.
-        if (createResult)
-            replicationManager.SendCommand(name, new ChangeDTO(localValue.JsonString, ChangeType.Added, 0, localValue.ValueHash));
+            _dictionaryReplica[key] = localValue; // Update the value in the local dictionary
 
-        return createResult;
+            return true;
+        }
+        else // If the key does not exist, we create it and send a replication command
+        {
+            var createResult = _dictionaryReplica.TryAdd(key, localValue); // Attempt to add the new key-value pair
+
+            // If local change was a success, then replicate the change.
+            if (createResult)
+                replicationManager.SendCommand(new ChangeDTO(name, localValue.JsonString, ChangeType.AddUpdated, 0, localValue.ValueHash));
+            
+            return createResult;
+        }
     }
 
     internal bool TryGetValue(TKey key, [MaybeNullWhen(false)] out TValue value)
@@ -37,7 +49,7 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationM
 
         // If local change was a success, then replicate the change.
         if (removeResult && removedValue != null)
-            replicationManager.SendCommand(name, new ChangeDTO(removedValue.JsonString, ChangeType.Removed, removedValue.ValueHash, 0));
+            replicationManager.SendCommand(new ChangeDTO(name, removedValue.JsonString, ChangeType.Removed, removedValue.ValueHash, 0));
 
         return removeResult;
     }
@@ -46,6 +58,6 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationM
     {
         _dictionaryReplica.Clear();
 
-        replicationManager.SendCommand(name, new ChangeDTO(string.Empty, ChangeType.ClearCollection, 0, 0));
+        replicationManager.SendCommand(new ChangeDTO(name, string.Empty, ChangeType.ClearCollection, 0, 0));
     }
 }

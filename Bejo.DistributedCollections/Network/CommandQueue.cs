@@ -1,4 +1,7 @@
 using System.Collections.Concurrent;
+using System.Net;
+using System.Text.Json;
+using System.Xml.Linq;
 
 namespace Bejo.DistributedCollections.Network;
 
@@ -17,21 +20,74 @@ internal class CommandQueue
 
     private readonly Protocol _protocol;
 
-    internal CommandQueue(NodeSettings nodeSettings, int retryCount, TimeSpan timeout, bool compress, string? password)
+    internal CommandQueue(NodeSettings nodeSettings, int retryCount, TimeSpan timeout, bool compress, string? password, CancellationToken cancellationToken)
     {
         _nodeSettings = nodeSettings;
         _protocol = new Protocol(_nodeSettings.Host, _nodeSettings.Port, retryCount, timeout, compress, password);
+
+//        _address = $"{node.Host}:{node.Port}";
+
+        _protocol = new Protocol(_nodeSettings.Host, _nodeSettings.Port, retryCount, timeout, compress, password);
+
+        _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _signal.Release();
+
+        _processChangesTask = ProcessCommandAsync(_cancellationTokenSource.Token);
+        _nodeStatTask = MonitorNodeStatusAsync(_nodeSettings.PingInterval, _cancellationTokenSource.Token);
     }
 
 
-    internal void SendCommand(string collectionName, ChangeDTO changeDto)
+    internal void SendCommand(ChangeDTO changeDto)
     {
+        _changes.Enqueue(changeDto);
+
+        // Fortæl køen at der er en ændring at behandle
+        _signal.Release();
+
+
         // Here you would implement the logic to send the command to the node specified in _nodeSettings.
         // This could involve network communication, serialization, etc.
         // For example:
         // var client = new HttpClient();
         // var response = await client.PostAsJsonAsync($"{_nodeSettings.Address}/api/replicate/{collectionName}", changeDto);
         // response.EnsureSuccessStatusCode();
+    }
+
+
+    private async Task ProcessCommandAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            // hvis der ikke er noget i køen, så venter vi på at der kommer noget
+            if (_changes.IsEmpty)
+                await _signal.WaitAsync(cancellationToken);
+
+            // Hvis der er noget i køen, så tager vi det og sender det til de andre noder
+            if (_changes.TryPeek(out var command))
+            {
+                try
+                {
+                    var x = await _protocol.SendCommand(command);
+
+                    _changes.TryDequeue(out var _);
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine($"Error sending command to node {_nodeSettings.Host}:{_nodeSettings.Port} - {e.Message}");
+                }
+                                
+                
+            }
+        }
+    }
+    private async Task? MonitorNodeStatusAsync(TimeSpan pingInterval, CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            await Task.Delay(pingInterval, token); // Check every pingInterval
+
+            _networkStat = await _protocol.SendPingAsync();
+        }
     }
 }
 
