@@ -1,6 +1,23 @@
 ﻿
 using Bejo.DistributedCollections.Network;
 
+
+var rs = new Bejo.DistributedCollections.ReplicationSet(
+    new Bejo.DistributedCollections.ReplicationSetSettings
+    (
+        10001,
+        true,
+        ["abc123abc"],
+        [
+            new("localhost", 10002, TimeSpan.FromSeconds(2), true),
+            new("localhost", 10003, TimeSpan.FromSeconds(2), true)
+        ]
+    ));
+
+var myDictionary = rs.GetOrCreateDistributedDictionary<int, string>("myDictionary");
+
+
+/*
 Console.WriteLine("Starting server...");
 
 var s = new Server(12345, true, new List<string>{ "abc123abc", "123454321"}, message => message.Reverse().ToArray());
@@ -30,4 +47,5 @@ for(int i = 0; i < 4; i++)
 
 
 Console.WriteLine("End");
-Console.ReadKey();   
+Console.ReadKey();
+*/
