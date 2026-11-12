@@ -12,11 +12,11 @@ internal class Server
     private readonly int _port;
     private TcpListener? _listener;
     private readonly bool _compress;
-    private readonly List<string> _passwords;
+    private readonly List<string>? _passwords;
 
     private readonly Func<byte[], byte[]> _handleRequest;
 
-    internal Server(int port, bool compress, List<string> passwords, Func<byte[], byte[]> handleRequest)
+    internal Server(int port, bool compress, List<string>? passwords, Func<byte[], byte[]> handleRequest)
     {
         _port = port;
         _handleRequest = handleRequest;
@@ -74,32 +74,54 @@ internal class Server
 
                 while (!cancellationToken.IsCancellationRequested)
                 {
+                    // Afvent og læs beskred fra client
                     var message = await NetworkMessageFraming.ReadAsync(stream, cancellationToken);
 
                     if (message == null)
-                        break;
-
-                    if(_passwords != null && _passwords.Count > 0)
                     {
-                        foreach (var password in _passwords)
+                        break;  // Luk forbindelsen til klienten ved at bryde while loopet
+                    }
+                    else
+                    {
+                        // Hvis der er valgt at kryptere, så forsøg at dekryptere beskeden.
+                        if(_passwords != null && _passwords.Count > 0)
                         {
-                            var messageDecrypted = Helpers.Helper.Decrypt(message, password);
-                            if (messageDecrypted != null)
+                            byte[]? messageDecrypted = null;
+
+                            int i =0;
+                            do
                             {
-                                message = messageDecrypted;
-                                break;
+                                messageDecrypted = Helpers.Helper.Decrypt(message, _passwords[i]);
+                                if (messageDecrypted != null)
+                                    message = messageDecrypted;
+                                else
+                                    i++;
+                            } while (messageDecrypted == null && i < _passwords.Count);
+
+                            // Hvis dekrypteringen fejler, send en fejlbesked til klienten.
+                            if (messageDecrypted == null)
+                            {
+                                message = null;
+                                await NetworkMessageFraming.WriteAsync(stream, System.Text.Encoding.UTF8.GetBytes("Failed to decrypt message."), cancellationToken);
                             }
                         }
-                        if (message == null)
-                            throw new UnauthorizedAccessException("Failed to decrypt message with provided passwords.");
+
+                        // Hvis der er valgt at komprimere, så dekomprimer beskeden.
+                        if(_compress && message != null)
+                        {
+                            message = Helpers.Helper.Decompress(message);
+
+                            // Hvis dekomprimeringen fejler, send en fejlbesked til klienten.
+                            if (message == null)
+                                await NetworkMessageFraming.WriteAsync(stream, System.Text.Encoding.UTF8.GetBytes("Failed to decompress message."), cancellationToken);
+                        }
+
+                        if (message != null) {
+                            var response = _handleRequest(message);
+
+                            await NetworkMessageFraming.WriteAsync(stream, response, cancellationToken);
+                        }
                     }
-
-                    if(_compress)
-                        message = Helpers.Helper.Decompress(message);
-
-                    var response = _handleRequest(message);
-
-                    await NetworkMessageFraming.WriteAsync(stream, response, cancellationToken);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

@@ -99,14 +99,21 @@ internal static class Helper
         return output.ToArray();
     }
 
-    internal static byte[] Decompress(byte[] data)
+    internal static byte[]? Decompress(byte[] data)
     {
-        MemoryStream input = new MemoryStream(data);
-        MemoryStream output = new MemoryStream();
-        using (DeflateStream dstream = new DeflateStream(input, CompressionMode.Decompress))
+        try
         {
-            dstream.CopyTo(output);
+            MemoryStream input = new MemoryStream(data);
+            MemoryStream output = new MemoryStream();
+            using (DeflateStream dstream = new DeflateStream(input, CompressionMode.Decompress))
+            {
+                dstream.CopyTo(output);
+            }
+            return output.ToArray();
         }
-        return output.ToArray();
+        catch (Exception)
+        {
+            return null;
+        }
     }
 }

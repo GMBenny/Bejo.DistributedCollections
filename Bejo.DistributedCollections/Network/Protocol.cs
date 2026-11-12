@@ -57,7 +57,7 @@ internal class Protocol
 
 
         // If we reach this point, the message was not recognized
-        return new byte[0];
+        return Encoding.UTF8.GetBytes($"Error: Unrecognized message format.");
     }
 
     internal async Task<NetworkStat> SendPing()
@@ -110,10 +110,10 @@ internal class Protocol
         var response = await _client.SendAsync(messageBytes);
         
         var responseString = Encoding.UTF8.GetString(response);
-        ulong.TryParse(responseString, out ulong responseHash);
-
-        if(responseHash != messageHash)
-            throw new InvalidOperationException("Response hash does not match."); // TODO: Resend the message if the hash does not match
+        if(!ulong.TryParse(responseString, out ulong responseHash)) // If response is not a hash-code, then it is an error
+            throw new InvalidOperationException($"Error from server: {responseString}");
+        else if(responseHash != messageHash)
+            throw new InvalidOperationException("Response hash does not match");
         else
             return responseString;
     }
