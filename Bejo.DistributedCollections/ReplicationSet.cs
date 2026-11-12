@@ -46,8 +46,8 @@ public class ReplicationSet
         }
 
         // If it does not exist, create a new distributed dictionary
-        var node = new DistributedCollectionNode<TKey, TValue>(_replicationManager);
-        var distributedDictionary = new DistributedDictionary<TKey, TValue>(name, node);
+        var node = new DistributedCollectionNode<TKey, LocalStorage<TKey, TValue>>(name, _replicationManager);
+        var distributedDictionary = new DistributedDictionary<TKey, TValue>(node);
         _distributedCollections.Add(name, distributedDictionary);
 
         return distributedDictionary;

@@ -2,16 +2,21 @@ namespace Bejo.DistributedCollections.Network;
 
 internal class ReplicationManager
 {
-    private readonly ReplicationSetSettings _replicationSetSettings;
-    private readonly List<ChangeTracker> _changeTrackers = new List<ChangeTracker>();
+    private readonly List<CommandQueue> _changeTrackers = new List<CommandQueue>();
 
     public ReplicationManager(ReplicationSetSettings replicationSetSettings)
     {
-        _replicationSetSettings = replicationSetSettings;
-        
         foreach (var nodeSettings in replicationSetSettings.nodes)
         {
-            _changeTrackers.Add(new ChangeTracker(nodeSettings));
+            _changeTrackers.Add(new CommandQueue(nodeSettings, replicationSetSettings.retryCount, replicationSetSettings.timeout, replicationSetSettings.compressData, replicationSetSettings.passwords?.FirstOrDefault() ));
         }
     }
-}
+
+    internal void SendCommand(string collectionName, ChangeDTO changeDto)
+    {
+        foreach (var c in _changeTrackers)
+        {
+            c.SendCommand(collectionName, changeDto);
+        }
+    }
+}   

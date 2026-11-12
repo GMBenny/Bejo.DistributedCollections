@@ -8,10 +8,13 @@ var rs = new Bejo.DistributedCollections.ReplicationSet(
         10001,
         true,
         ["abc123abc"],
+        true,
         [
             new("localhost", 10002, TimeSpan.FromSeconds(2), true),
             new("localhost", 10003, TimeSpan.FromSeconds(2), true)
-        ]
+        ],
+        3,
+        TimeSpan.FromSeconds(2)
     ));
 
 var myDictionary = rs.GetOrCreateDistributedDictionary<int, string>("myDictionary");

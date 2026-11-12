@@ -3,28 +3,28 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Bejo.DistributedCollections.Dictionary;
 
-public class DistributedDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IDistributedCollection
-    where TKey : notnull
+public class DistributedDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IDistributedCollection where TKey : notnull
 {
-    private readonly string _name;
+    private readonly DistributedCollectionNode<TKey, LocalStorage<TKey, TValue>> _node;
 
-    private readonly DistributedCollectionNode<TKey, TValue> _node;
-
-    internal DistributedDictionary(string name, DistributedCollectionNode<TKey, TValue> node)
+    internal DistributedDictionary(DistributedCollectionNode<TKey, LocalStorage<TKey, TValue>> node)
     {
-        _name = name;
         _node = node;
     }
 
     public TValue this[TKey key] 
     { 
-        get => _node.TryGetValue(key, out var value) ? value : throw new KeyNotFoundException();
-        set => _node.Add(key, value);
+        get => _node.TryGetValue(key, out var value) ? value.Value ?? throw new KeyNotFoundException() : throw new KeyNotFoundException();
+        
+        set 
+        {
+            _node.TryCreate(key, new LocalStorage<TKey, TValue>(key, value));
+        }
     }
 
     public ICollection<TKey> Keys => _node.Keys;
     
-    public ICollection<TValue> Values => _node.Values;
+    public ICollection<TValue> Values => _node.Values.Select(v => v.Value ?? throw new KeyNotFoundException()).ToList();
 
     public int Count => _node.Keys.Count;
 
@@ -32,34 +32,34 @@ public class DistributedDictionary<TKey, TValue> : IDictionary<TKey, TValue>, ID
 
     public void Add(TKey key, TValue value)
     {
-        _node.Add(key, value);
+        _node.TryCreate(key, new LocalStorage<TKey, TValue>(key, value));
     }
 
     public void Add(KeyValuePair<TKey, TValue> item)
     {
-        _node.Add(item.Key, item.Value);
+        _node.TryCreate(item.Key, new LocalStorage<TKey, TValue>(item.Key, item.Value));
     }
 
     public void Clear()
     {
-        throw new NotImplementedException();
+        _node.Clear();
     }
 
     public bool Contains(KeyValuePair<TKey, TValue> item)
     {
-        throw new NotImplementedException();
+        return _node.TryGetValue(item.Key, out var value) && EqualityComparer<TValue>.Default.Equals(value.Value, item.Value);
     }
 
     public bool ContainsKey(TKey key)
     {
-        throw new NotImplementedException();
+        return _node.TryGetValue(key, out _);
     }
 
     public void CopyTo(KeyValuePair<TKey, TValue>[] array, int arrayIndex)
     {
         foreach (var key in _node.Keys)
         {
-            array[arrayIndex++] = new KeyValuePair<TKey, TValue>(key, _node.TryGetValue(key, out var value) ? value : throw new KeyNotFoundException());
+            array[arrayIndex++] = new KeyValuePair<TKey, TValue>(key, _node.TryGetValue(key, out var value) ? value.Value ?? throw new KeyNotFoundException() : throw new KeyNotFoundException());
         }
     }
 
@@ -68,7 +68,7 @@ public class DistributedDictionary<TKey, TValue> : IDictionary<TKey, TValue>, ID
         var dict = new Dictionary<TKey, TValue>(_node.Keys.Count);
         foreach (var key in _node.Keys)
         {
-            dict[key] = _node.TryGetValue(key, out var value) ? value : throw new KeyNotFoundException();
+            dict[key] = _node.TryGetValue(key, out var value) ? value.Value ?? throw new KeyNotFoundException() : throw new KeyNotFoundException();
         }
         return dict;
     }
@@ -85,12 +85,12 @@ public class DistributedDictionary<TKey, TValue> : IDictionary<TKey, TValue>, ID
 
     public bool Remove(KeyValuePair<TKey, TValue> item)
     {
-        return _node.TryGetValue(item.Key, out var value) && EqualityComparer<TValue>.Default.Equals(value, item.Value) && _node.Remove(item.Key);
+        return _node.TryGetValue(item.Key, out var value) && EqualityComparer<TValue>.Default.Equals(value.Value, item.Value) && _node.Remove(item.Key);
     }
 
     public bool TryGetValue(TKey key, [MaybeNullWhen(false)] out TValue value)
     {
-        return _node.TryGetValue(key, out value);
+        return _node.TryGetValue(key, out var localStorage) ? (value = localStorage.Value) != null : (value = default) != null;
     }
 
     IEnumerator IEnumerable.GetEnumerator()
