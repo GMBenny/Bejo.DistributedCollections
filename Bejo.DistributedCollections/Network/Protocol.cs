@@ -6,7 +6,9 @@ namespace Bejo.DistributedCollections.Network;
 
 internal class Protocol
 {
+    // Either one is in use, depending on whether this instance is a client or a server
     private readonly Client? _client;
+    private readonly Dictionary<string, IDistributedCollection>? _distributedCollections;
 
     // Constructor for Clients
     internal Protocol(string host, int port, int retryCount, TimeSpan timeout, bool compress, string? password)
@@ -15,13 +17,16 @@ internal class Protocol
     }
 
     // Constructor for Servers
-    internal Protocol() //Func<byte[], byte[]> messageHandler)
+    internal Protocol(Dictionary<string, IDistributedCollection> distributedCollections)
     {
+        _distributedCollections = distributedCollections;
     }
 
     // Kaldes når der kommer noget ind på serveren
     internal byte[] MessageHandler(byte[] message)
     {
+        IsServerCheck();
+
         var messageString = Encoding.UTF8.GetString(message.Take(40).ToArray()).ToUpper();
 
         // If this is a system message
@@ -64,6 +69,16 @@ internal class Protocol
                     var command = JsonSerializer.Deserialize<ChangeDTO>(content.Message);
 
                     // Do stuff with command
+                    var collectionName = command.CollectionName;
+
+                    if (_distributedCollections.TryGetValue(collectionName, out var collection))
+                    {
+                        Console.WriteLine($"Received command for collection '{collectionName}': {command.Action}");
+                    }
+                    else
+                    { 
+                        Console.WriteLine($"Collection '{collectionName}' not found.");
+                    }
 
                     // Return this hash for verification on client side
                     return Encoding.UTF8.GetBytes(content.Hash.ToString());
@@ -145,11 +160,12 @@ internal class Protocol
         IsClientCheck();
 
         // Compute the hash of the message for integrity verification
-        var message = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(command));
+        var messageText = JsonSerializer.Serialize(command);
+        var message = Encoding.UTF8.GetBytes(messageText);
         var messageHash = Helpers.Helper.Hash(message);
 
         // Prepare the message bytes to be sent, including the hash for verification
-        var messageBytes = Encoding.UTF8.GetBytes("COLLECTION:COMMAND:" + messageHash + ":" + message);
+        var messageBytes = Encoding.UTF8.GetBytes($"COLLECTION:COMMAND:{messageHash}:{messageText}");
 
         // Send the message to the server and await the response
         var response = await _client.SendAsync(messageBytes);
@@ -168,6 +184,13 @@ internal class Protocol
         if (_client == null)
         {
             throw new InvalidOperationException("This protocol instance is not a client.");
+        }
+    }
+    private void IsServerCheck()
+    {
+        if (_distributedCollections == null)
+        {
+            throw new InvalidOperationException("This protocol instance is not a server.");
         }
     }
     private (byte[] Message, ulong Hash) VerifyAndExtractMessage(string type, byte[] message)

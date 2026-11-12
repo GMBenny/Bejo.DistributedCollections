@@ -42,7 +42,6 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationM
         return _dictionaryReplica.TryGetValue(key, out var localStorage) ? (value = localStorage.Value) != null : (value = default) != null;
     }
 
-
     internal bool Remove(TKey key)
     {
         var removeResult = _dictionaryReplica.TryRemove(key, out var removedValue);

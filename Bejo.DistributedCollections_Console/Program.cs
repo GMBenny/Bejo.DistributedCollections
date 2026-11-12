@@ -1,35 +1,29 @@
 ﻿
-using Bejo.DistributedCollections.Network;
+
+var rs1 = new Bejo.DistributedCollections.ReplicationSet(new Bejo.DistributedCollections.ReplicationSetSettings(10001,true,["abc123abc"],true,[new("localhost", 10002, TimeSpan.FromSeconds(2), true)],3,TimeSpan.FromSeconds(2)));
+var rs2 = new Bejo.DistributedCollections.ReplicationSet(new Bejo.DistributedCollections.ReplicationSetSettings(10002, true, ["abc123abc"], true, [new("localhost", 10001, TimeSpan.FromSeconds(2), true)], 3, TimeSpan.FromSeconds(2)));
+
+await Task.Delay(5000);
+
+var d1 = rs1.GetOrCreateDistributedDictionary<int, string>("myDictionary");
+var d2 = rs2.GetOrCreateDistributedDictionary<int, string>("myDictionary");
 
 
-var rs = new Bejo.DistributedCollections.ReplicationSet(
-    new Bejo.DistributedCollections.ReplicationSetSettings
-    (
-        10001,
-        true,
-        ["abc123abc"],
-        true,
-        [
-            new("localhost", 10002, TimeSpan.FromSeconds(2), true),
-            new("localhost", 10003, TimeSpan.FromSeconds(2), true)
-        ],
-        3,
-        TimeSpan.FromSeconds(2)
-    ));
+d1.Add(1, "one");
+d1.Add(2, "two");
 
-var myDictionary = rs.GetOrCreateDistributedDictionary<int, string>("myDictionary");
-
-
-myDictionary.Add(1, "one");
-myDictionary.Add(2, "two");
-
-foreach (var item in myDictionary)
+foreach (var item in d1)
 {
-    Console.WriteLine($"Key: {item.Key}, Value: {item.Value}");
+    Console.WriteLine($"D1: Key: {item.Key}, Value: {item.Value}");
+}
+foreach (var item in d2)
+{
+    Console.WriteLine($"D2: Key: {item.Key}, Value: {item.Value}");
 }
 
 
 
+await Task.Delay(100000);
 
 Console.WriteLine("Press any key to exit...");
 Console.ReadKey();

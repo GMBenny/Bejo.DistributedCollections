@@ -12,11 +12,11 @@ internal class Server
     private readonly int _port;
     private TcpListener? _listener;
     private readonly bool _compress;
-    private readonly List<string>? _passwords;
+    private readonly string[]? _passwords;
 
     private readonly Func<byte[], byte[]> _handleRequest;
 
-    internal Server(int port, bool compress, List<string>? passwords, Func<byte[], byte[]> handleRequest)
+    internal Server(int port, bool compress, string[]? passwords, Func<byte[], byte[]> handleRequest)
     {
         _port = port;
         _handleRequest = handleRequest;
@@ -84,7 +84,7 @@ internal class Server
                     else
                     {
                         // Hvis der er valgt at kryptere, så forsøg at dekryptere beskeden.
-                        if(_passwords != null && _passwords.Count > 0)
+                        if(_passwords != null && _passwords.Length > 0)
                         {
                             byte[]? messageDecrypted = null;
 
@@ -96,7 +96,7 @@ internal class Server
                                     message = messageDecrypted;
                                 else
                                     i++;
-                            } while (messageDecrypted == null && i < _passwords.Count);
+                            } while (messageDecrypted == null && i < _passwords.Length);
 
                             // Hvis dekrypteringen fejler, send en fejlbesked til klienten.
                             if (messageDecrypted == null)
