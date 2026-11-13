@@ -9,11 +9,13 @@ internal class CommandDTO
 
     public ChangeType Action { get; private set; }
 
+    public DateTime TimestampUTC { get; private set; }
     public ulong FromValueHash { get; private set; }
     public ulong ToValueHash { get; private set; }
 
     public CommandDTO(string collectionName, string jsonObject, ChangeType action, ulong fromValueHash, ulong toValueHash)
     {
+        TimestampUTC = DateTime.UtcNow;
         CollectionName = collectionName;
         JsonObject = jsonObject;
         Action = action;

@@ -40,7 +40,7 @@ public class ReplicationSet : ICommandReceiver
         _commandSender = commandSender;
     }
 
-    public delegate TValue HandleConflict<TKey, TValue>(TKey key, TValue localValue, TValue distributedValue);
+    public delegate TValue HandleConflict<TKey, TValue>(TKey key, ConflictData<TValue> localValue, ConflictData<TValue> distributedValue);
     public IDictionary<TKey, TValue> GetOrCreateDistributedDictionary<TKey, TValue>(string name, HandleConflict<TKey, TValue> handleConflict) where TKey : notnull
     {
         ValidateKeyType(typeof(TKey));
@@ -120,7 +120,7 @@ public class ReplicationSet : ICommandReceiver
 
     private CollectionInfo CreateRemoteDictionary<TKey, TValue>(string name) where TKey : notnull
     {
-        return CreateDictionary<TKey, TValue>(name, (key, localValue, distributedValue) => localValue);
+        return CreateDictionary<TKey, TValue>(name, (key, localValue, distributedValue) => localValue.Value);
     }
 
     private static void ValidateKeyType(Type keyType)
@@ -143,7 +143,10 @@ public class ReplicationSet : ICommandReceiver
     }
 }
 
+// De herunder, bør flyttes
 
 public enum ThisStatus { Starting, Started, Stopped, Faulted }
 
 public record ReplicationSetStatus(string NodeName, ThisStatus ThisStatus, NetworkStat[] NetworkStats);
+
+public record ConflictData<TValue>(ulong HashCode, DateTime CreatedTimestamp, TValue Value);

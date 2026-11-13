@@ -27,10 +27,30 @@ do
          rs2.GetReplicationSetStatus().ThisStatus != Bejo.DistributedCollections.ThisStatus.Started || 
          rs3.GetReplicationSetStatus().ThisStatus  != Bejo.DistributedCollections.ThisStatus.Started);
 
-var d1 = rs1.GetOrCreateDistributedDictionary<int, string>("myDictionary", (key, localValue, distributedValue) => localValue);
-var d2 = rs2.GetOrCreateDistributedDictionary<int, string>("myDictionary", (key, localValue, distributedValue) => localValue);
+string h1(int k, ConflictData<string> a, ConflictData<string> b)
+{
+    return b.Value;
+}
+string h2(int k, ConflictData<string> a, ConflictData<string> b)
+{
+    return b.Value;
+}
+
+var d1 = rs1.GetOrCreateDistributedDictionary<int, string>("myDictionary", h1);
+var d2 = rs2.GetOrCreateDistributedDictionary<int, string>("myDictionary", h2);
+
+d1.TryAdd(1, "one");
+d2.TryAdd(1, "two");
+
+Console.WriteLine($"D1: Key 1: {d1[1]} / {d2[1]}");
 
 await Task.Delay(1000);
+
+Console.WriteLine($"D1: Key 1: {d1[1]} / {d2[1]}");
+
+await Task.Delay(1000);
+
+Console.WriteLine($"D1: Key 1: {d1[1]} / {d2[1]}");
 
 Console.WriteLine("All collections in each replication set:");
 
@@ -56,7 +76,7 @@ await Task.Delay(1500);
 
 Console.WriteLine("Create d3");
 
-var d3 = rs3.GetOrCreateDistributedDictionary<int, string>("myDictionary", (key, localValue, distributedValue) => localValue);
+var d3 = rs3.GetOrCreateDistributedDictionary<int, string>("myDictionary", (key, localValue, distributedValue) => localValue.Value);
 foreach (var item in d3)
 {
     Console.WriteLine($"D3: Key: {item.Key}, Value: {item.Value}");

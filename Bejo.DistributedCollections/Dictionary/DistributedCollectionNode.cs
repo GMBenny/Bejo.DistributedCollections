@@ -92,8 +92,8 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ICommandSend
                     else
                     {
                         // Der er sket en konflikt - håndter det - Kald brugeren, som skal fixe det
-                        Console.WriteLine($"Conflict detected for key {l.Key}. Existing value hash: {existingValue.ValueHash}, incoming value hash: {command.FromValueHash}");
-                        var resolvedValue = _handleConflict(l.Key, existingValue.Value, l.Value);
+                        //Console.WriteLine($"Conflict detected for key {l.Key}. Existing value hash: {existingValue.ValueHash}, incoming value hash: {command.FromValueHash}");
+                        var resolvedValue = _handleConflict(l.Key, new ConflictData<TValue>(existingValue.ValueHash, existingValue.LastChangedUTC, existingValue.Value), new ConflictData<TValue>(l.ValueHash, l.LastChangedUTC, l.Value));
                         _dictionaryReplica[l.Key] = new LocalStorage<TKey, TValue>(l.Key, resolvedValue);
                     }
                 }
