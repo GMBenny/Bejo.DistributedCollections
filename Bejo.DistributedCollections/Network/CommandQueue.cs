@@ -9,7 +9,7 @@ internal class CommandQueue
 {
     private readonly NodeSettings _nodeSettings;
     private NetworkStat _networkStat = new NetworkStat(DateTime.MinValue, NetworkStatus.Offline, TimeSpan.Zero);
-    private readonly ConcurrentQueue<ChangeDTO> _changes = new();
+    private readonly ConcurrentQueue<CommandDTO> _changes = new();
     private readonly SemaphoreSlim _signal = new(0);
 
     // Baggrundsopgave til at behandle ændringer
@@ -37,7 +37,7 @@ internal class CommandQueue
     }
 
 
-    internal void SendCommand(ChangeDTO changeDto)
+    internal void SendCommand(CommandDTO changeDto)
     {
         _changes.Enqueue(changeDto);
 

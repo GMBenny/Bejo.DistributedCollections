@@ -28,7 +28,8 @@ internal class Server
     {
         State = ServerState.Starting;
 
-        _listener = new TcpListener(IPAddress.Any, _port);
+        _listener = new TcpListener(IPAddress.IPv6Any, _port);
+        _listener.Server.DualMode = true;
         _listener.Start();
 
         State = ServerState.started;

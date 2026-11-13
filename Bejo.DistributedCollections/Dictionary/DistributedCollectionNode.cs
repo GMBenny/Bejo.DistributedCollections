@@ -4,7 +4,7 @@ using Bejo.DistributedCollections.Network;
 
 namespace Bejo.DistributedCollections.Dictionary;
 
-internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationManager replicationManager) where TKey : notnull
+internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationManager replicationManager) : IDistributedCollectionNode where TKey : notnull
 {
     private readonly ConcurrentDictionary<TKey, LocalStorage<TKey, TValue>> _dictionaryReplica = new();
 
@@ -19,7 +19,7 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationM
         // If the key already exists, we update it and send a replication command
         if (_dictionaryReplica.TryGetValue(key, out var existingValue))
         {
-            replicationManager.SendCommand(new ChangeDTO(name, localValue.JsonString, ChangeType.AddUpdated, existingValue.ValueHash, localValue.ValueHash));
+            replicationManager.SendCommand(new CommandDTO(name, localValue.JsonString, ChangeType.AddUpdated, existingValue.ValueHash, localValue.ValueHash));
 
             _dictionaryReplica[key] = localValue; // Update the value in the local dictionary
 
@@ -31,7 +31,7 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationM
 
             // If local change was a success, then replicate the change.
             if (createResult)
-                replicationManager.SendCommand(new ChangeDTO(name, localValue.JsonString, ChangeType.AddUpdated, 0, localValue.ValueHash));
+                replicationManager.SendCommand(new CommandDTO(name, localValue.JsonString, ChangeType.AddUpdated, 0, localValue.ValueHash));
             
             return createResult;
         }
@@ -48,7 +48,7 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationM
 
         // If local change was a success, then replicate the change.
         if (removeResult && removedValue != null)
-            replicationManager.SendCommand(new ChangeDTO(name, removedValue.JsonString, ChangeType.Removed, removedValue.ValueHash, 0));
+            replicationManager.SendCommand(new CommandDTO(name, removedValue.JsonString, ChangeType.Removed, removedValue.ValueHash, 0));
 
         return removeResult;
     }
@@ -57,6 +57,49 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationM
     {
         _dictionaryReplica.Clear();
 
-        replicationManager.SendCommand(new ChangeDTO(name, string.Empty, ChangeType.ClearCollection, 0, 0));
+        replicationManager.SendCommand(new CommandDTO(name, string.Empty, ChangeType.ClearCollection, 0, 0));
+    }
+
+
+
+    public void CommandCallback(CommandDTO command)
+    {
+        var l = new LocalStorage<TKey, TValue>(command.JsonObject);
+
+        switch (command.Action)
+        {
+            case ChangeType.AddUpdated:
+                
+                if (_dictionaryReplica.TryGetValue(l.Key, out var existingValue))
+                {
+                    if (existingValue.ValueHash == command.FromValueHash)
+                    {
+                        _dictionaryReplica[l.Key] = l;
+                        // TODO: Fyr event af, så brugeren ved dette objekt er blevet opdateret via netwærket.
+                    }
+                    else
+                    {
+                        // Der er sket en konflikt - håndter det - Kald brugeren, som skal fixe det
+                        Console.WriteLine($"Conflict detected for key {l.Key}. Existing value hash: {existingValue.ValueHash}, incoming value hash: {command.FromValueHash}");
+                    }
+                }
+                else
+                {
+                    _dictionaryReplica.TryAdd(l.Key, l);
+                    // TODO: Fyr event af, så brugeren ved dette objekt er blevet opdateret via netwærket.
+                }
+
+                break;
+            case ChangeType.Removed:
+                _dictionaryReplica.TryRemove(l.Key, out _);
+                // TODO: Fyr event af, så brugeren ved dette objekt er blevet slettet via netwærket.
+                break;
+            case ChangeType.ClearCollection:
+                _dictionaryReplica.Clear();
+                // TODO: Fyr event af, så brugeren ved hele collectionen er blevet ryddet via netwærket.
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported command action: {command.Action}");
+        }
     }
 }

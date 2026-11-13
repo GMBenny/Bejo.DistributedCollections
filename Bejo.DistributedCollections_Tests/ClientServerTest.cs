@@ -10,7 +10,7 @@ public class ClientServerTest
     [Fact]
     public async Task Sunshine()
     {
-        var s = new Server(10000, true, new List<string>{ "abc123abc", "123454321"}, message => message.Reverse().ToArray());
+        var s = new Server(10000, true, new[] { "abc123abc", "123454321" }, message => message.Reverse().ToArray());
 
         Task.Run(async () => { 
             await s.StartAsync(); // Dette kald blokere tråden hvis det køres synkront

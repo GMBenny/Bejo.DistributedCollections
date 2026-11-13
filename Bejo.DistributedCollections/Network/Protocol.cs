@@ -1,4 +1,7 @@
+using Bejo.DistributedCollections.Dictionary;
+using System.Collections;
 using System.Diagnostics;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 
@@ -8,7 +11,8 @@ internal class Protocol
 {
     // Either one is in use, depending on whether this instance is a client or a server
     private readonly Client? _client;
-    private readonly Dictionary<string, IDistributedCollection>? _distributedCollections;
+    private readonly Dictionary<string, CollectionInfo>? _distributedCollections;
+    private readonly ReplicationManager? _replicationManager;
 
     // Constructor for Clients
     internal Protocol(string host, int port, int retryCount, TimeSpan timeout, bool compress, string? password)
@@ -17,9 +21,10 @@ internal class Protocol
     }
 
     // Constructor for Servers
-    internal Protocol(Dictionary<string, IDistributedCollection> distributedCollections)
+    internal Protocol(Dictionary<string, CollectionInfo> distributedCollections, ReplicationManager replicationManager)
     {
         _distributedCollections = distributedCollections;
+        _replicationManager = replicationManager;
     }
 
     // Kaldes når der kommer noget ind på serveren
@@ -46,8 +51,11 @@ internal class Protocol
                     var content = VerifyAndExtractMessage("SYSTEM:MESSAGE:", message);
 
                     // Do stuff with content.Message
+                    var messageHash = Helpers.Helper.Hash(content.Message);
 
                     // Return this hash for verification on client side
+
+                    // TODO: Burde det ikke være messageHash og ikke content.Hash vi sender retur? Undersøg først om de er ens og om jeg laver hash af det rigtige data
                     return Encoding.UTF8.GetBytes(content.Hash.ToString());
                 }
                 catch (Exception ex)  // Flere ting kan have gået galt, men vi stoler ikke på beskeden
@@ -66,18 +74,31 @@ internal class Protocol
                 {
                     var content = VerifyAndExtractMessage("COLLECTION:COMMAND:", message);
 
-                    var command = JsonSerializer.Deserialize<ChangeDTO>(content.Message);
+                    var command = JsonSerializer.Deserialize<CommandDTO>(content.Message);
 
-                    // Do stuff with command
-                    var collectionName = command.CollectionName;
-
-                    if (_distributedCollections.TryGetValue(collectionName, out var collection))
+                    // Hvis command er opret en collection og den ikke allerede findes, så opret den ud fra medfølgende info
+                    if (command.Action == ChangeType.CreateCollection && !_distributedCollections.TryGetValue(command.CollectionName, out var _))
                     {
-                        Console.WriteLine($"Received command for collection '{collectionName}': {command.Action}");
+                        var node = new DistributedCollectionNode<int, string>(command.CollectionName, _replicationManager);
+
+
+                        var info = JsonSerializer.Deserialize<DictionaryTypeInfo>(command.JsonObject)!;
+
+                        var keyType = Type.GetType(info.KeyType)!;
+                        var valueType = Type.GetType(info.ValueType)!;
+
+                        var dictionaryType = typeof(DistributedDictionary<,>).MakeGenericType(keyType, valueType);
+
+                        //var dictionary = (IDistributedCollection)Activator.CreateInstance(dictionaryType, node);
+                        var dictionary = (IDistributedCollection)Activator.CreateInstance(dictionaryType, BindingFlags.Instance | BindingFlags.NonPublic, binder: null, args: new object[] { node }, culture: null)!;
+
+                        _distributedCollections.Add(command.CollectionName, new CollectionInfo(info.CollectionType, dictionary!, node));
                     }
-                    else
-                    { 
-                        Console.WriteLine($"Collection '{collectionName}' not found.");
+                    // Og hvis collection allerede findes, så send command videre til den
+                    else if (_distributedCollections.TryGetValue(command.CollectionName, out var collection))
+                    {
+                        // TODO: Er dette ok eller grimt? Bliver jeg for pragmatisk her?
+                        collection.Node.CommandCallback(command);
                     }
 
                     // Return this hash for verification on client side
@@ -154,7 +175,7 @@ internal class Protocol
     }
 
 
-    internal async Task<string> SendCommand(ChangeDTO command)
+    internal async Task<string> SendCommand(CommandDTO command)
     {
         // Ensure this instance is a client before sending a system message
         IsClientCheck();
@@ -188,7 +209,7 @@ internal class Protocol
     }
     private void IsServerCheck()
     {
-        if (_distributedCollections == null)
+        if (_distributedCollections == null || _replicationManager == null)
         {
             throw new InvalidOperationException("This protocol instance is not a server.");
         }

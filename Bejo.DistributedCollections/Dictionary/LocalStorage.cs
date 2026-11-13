@@ -1,4 +1,6 @@
-﻿using System.Text.Json;
+﻿using Bejo.DistributedCollections.Network;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Bejo.DistributedCollections.Dictionary;
 
@@ -21,13 +23,20 @@ internal class LocalStorage<TKey, TValue>
         ValueHash = Helpers.Helper.Hash(JsonString);
     }
 
+    public LocalStorage(string jsonObject)
+    {
+        _dataObject = JsonSerializer.Deserialize<DataObject>(jsonObject) ?? throw new InvalidOperationException("Failed to deserialize JSON object.");
+        JsonString = jsonObject;
+        ValueHash = Helpers.Helper.Hash(JsonString);
+    }
+
     internal class DataObject
     {
         public TKey Key { get; }
         public TValue Value { get; }
         public DateTime LastChangedUTC { get; }
 
-        internal DataObject(TKey key, TValue value, DateTime lastChangedUTC)
+        public DataObject(TKey key, TValue value, DateTime lastChangedUTC)
         {
             Key = key;
             Value = value;
