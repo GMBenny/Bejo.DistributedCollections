@@ -1,4 +1,4 @@
-using Bejo.DistributedCollections.Network;
+using Bejo.DistributedCollections.Contracts;
 
 
 // TODO: Sikke noget rod - Det skal rydes op

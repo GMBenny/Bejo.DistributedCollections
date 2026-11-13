@@ -1,3 +1,4 @@
+using Bejo.DistributedCollections.Contracts;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Text.Json;

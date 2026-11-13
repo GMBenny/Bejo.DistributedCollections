@@ -1,4 +1,4 @@
-﻿namespace Bejo.DistributedCollections.Network;
+﻿namespace Bejo.DistributedCollections.Contracts;
 
 internal enum ChangeType { Ignored = 0, CreateCollection = 1, AddUpdated = 2, Removed = 3, ClearCollection = 4, RemoveCollection = 5 }
 internal class CommandDTO

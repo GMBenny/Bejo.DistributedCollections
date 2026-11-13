@@ -1,21 +1,20 @@
-using Bejo.DistributedCollections.Dictionary;
+using Bejo.DistributedCollections.Contracts;
 
 namespace Bejo.DistributedCollections.Network;
 
-internal class ReplicationManager
+internal class ReplicationManager : ICommandSender
 {
     private readonly List<CommandQueue> _commandQueues = new List<CommandQueue>();
     private readonly Server _server;
-    private readonly Task _serverTask;
+    private Task? _serverTask;
 
-    public ReplicationManager(ReplicationSetSettings replicationSetSettings, Dictionary<string, CollectionInfo> distributedCollections)
+    public ReplicationManager(ReplicationSetSettings replicationSetSettings, ICommandReceiver receiver)
     {
         _server = new Server(
             replicationSetSettings.listenerPort,
             replicationSetSettings.compress,
             replicationSetSettings.passwords,
-            new Protocol(distributedCollections, this).MessageHandler);
-        _serverTask = _server.StartAsync();
+            new Protocol(receiver).MessageHandler);
 
         foreach (var nodeSettings in replicationSetSettings.nodes)
         {
@@ -23,7 +22,12 @@ internal class ReplicationManager
         }
     }
 
-    internal void SendCommand(CommandDTO changeDto)
+    internal void Start()
+    {
+        _serverTask = _server.StartAsync();
+    }
+
+    public void SendCommand(CommandDTO changeDto)
     {
         foreach (var c in _commandQueues)
         {

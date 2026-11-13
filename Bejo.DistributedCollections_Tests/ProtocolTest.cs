@@ -1,4 +1,5 @@
 using Bejo.DistributedCollections.Network;
+using Bejo.DistributedCollections.Contracts;
 using FluentAssertions;
 using System.Text;
 
@@ -6,12 +7,17 @@ namespace Bejo.DistributedCollections_Tests;
 
 public class ProtocolTest
 {
+    private sealed class UnusedReceiver : ICommandReceiver
+    {
+        public void HandleCommand(CommandDTO command) => throw new InvalidOperationException("Unexpected command.");
+    }
+
     [Fact]
     public async Task Sunshine()
     {
-        var protocolServer = new Protocol();
+        var protocolServer = new Protocol(new UnusedReceiver());
 
-        var server = new Server(10002, true, new List<string>{ "abc123abc", "123454321"}, protocolServer.MessageHandler);
+        var server = new Server(10002, true, new[] { "abc123abc", "123454321"}, protocolServer.MessageHandler);
         Task.Run(async () => { await server.StartAsync(); });
 
         do
@@ -25,8 +31,8 @@ public class ProtocolTest
     [Fact]
     public async Task SendPing()
     {
-        var protocolServer = new Protocol();
-        var server = new Server(10003, true, new List<string>{ "abc123abc", "123454321"}, protocolServer.MessageHandler);
+        var protocolServer = new Protocol(new UnusedReceiver());
+        var server = new Server(10003, true, new[] { "abc123abc", "123454321"}, protocolServer.MessageHandler);
         Task.Run(async () => { await server.StartAsync(); });
 
         do
@@ -44,8 +50,8 @@ public class ProtocolTest
     [Fact]
     public async Task ReverseMessageWithHashCheck()
     {
-        var protocolServer = new Protocol();
-        var server = new Server(10004, true, new List<string>{ "abc123abc", "123454321"}, protocolServer.MessageHandler);
+        var protocolServer = new Protocol(new UnusedReceiver());
+        var server = new Server(10004, true, new[] { "abc123abc", "123454321"}, protocolServer.MessageHandler);
         Task.Run(async () => { await server.StartAsync(); });
 
         do
@@ -65,7 +71,7 @@ public class ProtocolTest
     [Fact]
     public async Task CompressionTest()
     {
-        var protocolServer = new Protocol();
+        var protocolServer = new Protocol(new UnusedReceiver());
         var server = new Server(10005, true, null, protocolServer.MessageHandler);
         Task.Run(async () => { await server.StartAsync(); });
 
@@ -85,7 +91,7 @@ public class ProtocolTest
         [Fact]
     public async Task NoCompressionTest()
     {
-        var protocolServer = new Protocol();
+        var protocolServer = new Protocol(new UnusedReceiver());
         var server = new Server(10006, false, null, protocolServer.MessageHandler);
         Task.Run(async () => { await server.StartAsync(); });
 
@@ -106,7 +112,7 @@ public class ProtocolTest
     [Fact]
     public async Task MismatchedCompressionTestA()
     {
-        var protocolServer = new Protocol();
+        var protocolServer = new Protocol(new UnusedReceiver());
         var server = new Server(10007, true, null, protocolServer.MessageHandler);
         Task.Run(async () => { await server.StartAsync(); });
 
@@ -126,7 +132,7 @@ public class ProtocolTest
     [Fact]
     public async Task MismatchedCompressionTestB()
     {
-        var protocolServer = new Protocol();
+        var protocolServer = new Protocol(new UnusedReceiver());
         var server = new Server(10008, false, null, protocolServer.MessageHandler);
         Task.Run(async () => { await server.StartAsync(); });
 
@@ -150,8 +156,8 @@ public class ProtocolTest
     [Fact]
     public async Task EncryptionTest()
     {
-        var protocolServer = new Protocol();
-        var server = new Server(10009, false, new List<string>{"abc123abc"}, protocolServer.MessageHandler);
+        var protocolServer = new Protocol(new UnusedReceiver());
+        var server = new Server(10009, false, new[] {"abc123abc"}, protocolServer.MessageHandler);
         Task.Run(async () => { await server.StartAsync(); });
 
         do
@@ -170,8 +176,8 @@ public class ProtocolTest
     [Fact]
     public async Task EncryptionTest_SecondaryPassword()
     {
-        var protocolServer = new Protocol();
-        var server = new Server(10011, false, new List<string>{"985jdgfwjr3", "abc123abc"}, protocolServer.MessageHandler);
+        var protocolServer = new Protocol(new UnusedReceiver());
+        var server = new Server(10011, false, new[] {"985jdgfwjr3", "abc123abc"}, protocolServer.MessageHandler);
         Task.Run(async () => { await server.StartAsync(); });
 
         do
@@ -190,8 +196,8 @@ public class ProtocolTest
     [Fact]
     public async Task EncryptionTest_WrongPAssword()
     {
-        var protocolServer = new Protocol();
-        var server = new Server(10020, false, new List<string>{"abc123abc"}, protocolServer.MessageHandler);
+        var protocolServer = new Protocol(new UnusedReceiver());
+        var server = new Server(10020, false, new[] {"abc123abc"}, protocolServer.MessageHandler);
         Task.Run(async () => { await server.StartAsync(); });
 
         do

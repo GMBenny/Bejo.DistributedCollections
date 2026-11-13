@@ -90,7 +90,7 @@ public class DistributedDictionary<TKey, TValue> : IDictionary<TKey, TValue>, ID
 
     public bool TryGetValue(TKey key, [MaybeNullWhen(false)] out TValue value)
     {
-        return _node.TryGetValue(key, out var localStorage) ? (value = localStorage) != null : (value = default) != null;
+        return _node.TryGetValue(key, out value);
     }
 
     IEnumerator IEnumerable.GetEnumerator()

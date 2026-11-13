@@ -1,10 +1,10 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
-using Bejo.DistributedCollections.Network;
+using Bejo.DistributedCollections.Contracts;
 
 namespace Bejo.DistributedCollections.Dictionary;
 
-internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationManager replicationManager) : IDistributedCollectionNode where TKey : notnull
+internal class DistributedCollectionNode<TKey, TValue>(string name, ICommandSender commandSender) : IDistributedCollectionNode where TKey : notnull
 {
     private readonly ConcurrentDictionary<TKey, LocalStorage<TKey, TValue>> _dictionaryReplica = new();
 
@@ -19,7 +19,7 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationM
         // If the key already exists, we update it and send a replication command
         if (_dictionaryReplica.TryGetValue(key, out var existingValue))
         {
-            replicationManager.SendCommand(new CommandDTO(name, localValue.JsonString, ChangeType.AddUpdated, existingValue.ValueHash, localValue.ValueHash));
+            commandSender.SendCommand(new CommandDTO(name, localValue.JsonString, ChangeType.AddUpdated, existingValue.ValueHash, localValue.ValueHash));
 
             _dictionaryReplica[key] = localValue; // Update the value in the local dictionary
 
@@ -31,7 +31,7 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationM
 
             // If local change was a success, then replicate the change.
             if (createResult)
-                replicationManager.SendCommand(new CommandDTO(name, localValue.JsonString, ChangeType.AddUpdated, 0, localValue.ValueHash));
+                commandSender.SendCommand(new CommandDTO(name, localValue.JsonString, ChangeType.AddUpdated, 0, localValue.ValueHash));
             
             return createResult;
         }
@@ -39,7 +39,14 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationM
 
     internal bool TryGetValue(TKey key, [MaybeNullWhen(false)] out TValue value)
     {
-        return _dictionaryReplica.TryGetValue(key, out var localStorage) ? (value = localStorage.Value) != null : (value = default) != null;
+        if (_dictionaryReplica.TryGetValue(key, out var localStorage))
+        {
+            value = localStorage.Value;
+            return true;
+        }
+
+        value = default;
+        return false;
     }
 
     internal bool Remove(TKey key)
@@ -48,7 +55,7 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationM
 
         // If local change was a success, then replicate the change.
         if (removeResult && removedValue != null)
-            replicationManager.SendCommand(new CommandDTO(name, removedValue.JsonString, ChangeType.Removed, removedValue.ValueHash, 0));
+            commandSender.SendCommand(new CommandDTO(name, removedValue.JsonString, ChangeType.Removed, removedValue.ValueHash, 0));
 
         return removeResult;
     }
@@ -57,18 +64,17 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationM
     {
         _dictionaryReplica.Clear();
 
-        replicationManager.SendCommand(new CommandDTO(name, string.Empty, ChangeType.ClearCollection, 0, 0));
+        commandSender.SendCommand(new CommandDTO(name, string.Empty, ChangeType.ClearCollection, 0, 0));
     }
 
 
 
     public void CommandCallback(CommandDTO command)
     {
-        var l = new LocalStorage<TKey, TValue>(command.JsonObject);
-
         switch (command.Action)
         {
             case ChangeType.AddUpdated:
+                var l = new LocalStorage<TKey, TValue>(command.JsonObject);
                 
                 if (_dictionaryReplica.TryGetValue(l.Key, out var existingValue))
                 {
@@ -91,7 +97,8 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ReplicationM
 
                 break;
             case ChangeType.Removed:
-                _dictionaryReplica.TryRemove(l.Key, out _);
+                var removed = new LocalStorage<TKey, TValue>(command.JsonObject);
+                _dictionaryReplica.TryRemove(removed.Key, out _);
                 // TODO: Fyr event af, så brugeren ved dette objekt er blevet slettet via netwærket.
                 break;
             case ChangeType.ClearCollection:
