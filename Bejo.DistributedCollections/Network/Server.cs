@@ -5,9 +5,10 @@ namespace Bejo.DistributedCollections.Network;
 
 internal class Server
 {
-    internal enum ServerState { Starting, started, Stopped }
+    internal enum ServerState { Starting, started, Stopped, Faulted }
 
-    internal ServerState State { get; private set; } = ServerState.Stopped;
+    private volatile ServerState _state = ServerState.Stopped;
+    internal ServerState State => _state;
 
     private readonly int _port;
     private TcpListener? _listener;
@@ -26,16 +27,16 @@ internal class Server
 
     internal async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        State = ServerState.Starting;
-
-        _listener = new TcpListener(IPAddress.IPv6Any, _port);
-        _listener.Server.DualMode = true;
-        _listener.Start();
-
-        State = ServerState.started;
+        _state = ServerState.Starting;
 
         try
         {
+            _listener = new TcpListener(IPAddress.IPv6Any, _port);
+            _listener.Server.DualMode = true;
+            _listener.Start();
+
+            _state = ServerState.started;
+
             while (!cancellationToken.IsCancellationRequested)
             {
                 try
@@ -54,18 +55,23 @@ internal class Server
                 }
             }
         }
+        catch
+        {
+            _state = ServerState.Faulted;
+            throw;
+        }
         finally
         {
-            _listener.Stop();
+            _listener?.Stop();
             _listener = null;
+            if (_state != ServerState.Faulted)
+                _state = ServerState.Stopped;
         }
     }
 
     private async Task HandleClientAsync(TcpClient client, CancellationToken cancellationToken)
     {
         var remoteEndPoint = client.Client.RemoteEndPoint;
-
-        Console.WriteLine($"Client connected: {remoteEndPoint}");
 
         using (client)
         {

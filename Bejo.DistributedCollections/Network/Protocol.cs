@@ -10,11 +10,13 @@ internal class Protocol
     // Either one is in use, depending on whether this instance is a client or a server
     private readonly Client? _client;
     private readonly ICommandReceiver? _receiver;
+    private string Address = "";
 
     // Constructor for Clients
     internal Protocol(string host, int port, int retryCount, TimeSpan timeout, bool compress, string? password)
     {
         _client = new Client(host, port, retryCount, timeout, compress, password);
+        Address = $"{host}:{port}";
     }
 
     // Constructor for Servers
@@ -114,16 +116,16 @@ internal class Protocol
             if (long.TryParse(Encoding.UTF8.GetString(response), out long ticks))
             {
                 if(startTime.Ticks < ticks && ticks < endTime.Ticks)
-                    return new NetworkStat(endTime, NetworkStatus.Online, stopWatch.Elapsed);
+                    return new NetworkStat(Address, endTime, NetworkStatus.Online, stopWatch.Elapsed);
                 else
-                    return new NetworkStat(endTime, NetworkStatus.TimeProblem, stopWatch.Elapsed);
+                    return new NetworkStat(Address, endTime, NetworkStatus.TimeProblem, stopWatch.Elapsed);
             }
             else
-                return new NetworkStat(DateTime.UtcNow, NetworkStatus.UnexpectedResult, stopWatch.Elapsed);
+                return new NetworkStat(Address, DateTime.UtcNow, NetworkStatus.UnexpectedResult, stopWatch.Elapsed);
         }
         catch
         {
-            return new NetworkStat(DateTime.UtcNow, NetworkStatus.Offline, TimeSpan.Zero);
+            return new NetworkStat(Address, DateTime.UtcNow, NetworkStatus.Offline, TimeSpan.Zero);
         }
     }
     internal async Task<string> SendSystemMessage(string message)

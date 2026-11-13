@@ -4,13 +4,19 @@ using Bejo.DistributedCollections.Contracts;
 
 namespace Bejo.DistributedCollections.Dictionary;
 
-internal class DistributedCollectionNode<TKey, TValue>(string name, ICommandSender commandSender) : IDistributedCollectionNode where TKey : notnull
+internal class DistributedCollectionNode<TKey, TValue>(string name, ICommandSender commandSender, ReplicationSet.HandleConflict<TKey, TValue> handleConflict) : IDistributedCollectionNode where TKey : notnull
 {
     private readonly ConcurrentDictionary<TKey, LocalStorage<TKey, TValue>> _dictionaryReplica = new();
+    private ReplicationSet.HandleConflict<TKey, TValue> _handleConflict = handleConflict;
 
     internal ICollection<TKey> Keys => _dictionaryReplica.Keys;
 
     internal ICollection<TValue> Values => _dictionaryReplica.Values.Select(v => v.Value).ToList();
+
+    internal void SetConflictHandler(ReplicationSet.HandleConflict<TKey, TValue> handleConflict)
+    {
+        _handleConflict = handleConflict;
+    }
 
     internal bool TryCreateUpdate(TKey key, TValue value)
     {
@@ -87,6 +93,8 @@ internal class DistributedCollectionNode<TKey, TValue>(string name, ICommandSend
                     {
                         // Der er sket en konflikt - håndter det - Kald brugeren, som skal fixe det
                         Console.WriteLine($"Conflict detected for key {l.Key}. Existing value hash: {existingValue.ValueHash}, incoming value hash: {command.FromValueHash}");
+                        var resolvedValue = _handleConflict(l.Key, existingValue.Value, l.Value);
+                        _dictionaryReplica[l.Key] = new LocalStorage<TKey, TValue>(l.Key, resolvedValue);
                     }
                 }
                 else

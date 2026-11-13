@@ -1,15 +1,13 @@
 using Bejo.DistributedCollections.Contracts;
 using System.Collections.Concurrent;
-using System.Net;
-using System.Text.Json;
-using System.Xml.Linq;
 
 namespace Bejo.DistributedCollections.Network;
 
-internal class CommandQueue
+internal class CommandHandler
 {
     private readonly NodeSettings _nodeSettings;
-    private NetworkStat _networkStat = new NetworkStat(DateTime.MinValue, NetworkStatus.Offline, TimeSpan.Zero);
+    internal NetworkStat NetworkStat { get; private set; } = new NetworkStat("", DateTime.MinValue, NetworkStatus.Offline, TimeSpan.Zero);
+    
     private readonly ConcurrentQueue<CommandDTO> _changes = new();
     private readonly SemaphoreSlim _signal = new(0);
 
@@ -21,7 +19,7 @@ internal class CommandQueue
 
     private readonly Protocol _protocol;
 
-    internal CommandQueue(NodeSettings nodeSettings, int retryCount, TimeSpan timeout, bool compress, string? password, CancellationToken cancellationToken)
+    internal CommandHandler(NodeSettings nodeSettings, int retryCount, TimeSpan timeout, bool compress, string? password, CancellationToken cancellationToken)
     {
         _nodeSettings = nodeSettings;
         _protocol = new Protocol(_nodeSettings.Host, _nodeSettings.Port, retryCount, timeout, compress, password);
@@ -87,7 +85,7 @@ internal class CommandQueue
         {
             await Task.Delay(pingInterval, token); // Check every pingInterval
 
-            _networkStat = await _protocol.SendPingAsync();
+            NetworkStat = await _protocol.SendPingAsync();
         }
     }
 }

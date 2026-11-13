@@ -18,13 +18,61 @@ public class ReplicationTest
     }
 
     [Fact]
+    public void LocalStatusIsStartedEvenWhenPeerHasNotResponded()
+    {
+        var set = new ReplicationSet(Settings(0, 1));
+
+        var status = set.GetReplicationSetStatus();
+
+        Assert.Equal(ThisStatus.Started, status.ThisStatus);
+        Assert.Equal(NetworkStatus.Offline, Assert.Single(status.NetworkStats).LastStatus);
+    }
+
+    [Fact]
+    public void LocalStatusIsFaultedWhenListenerCannotStart()
+    {
+        var reservation = new TcpListener(IPAddress.IPv6Any, 0);
+        reservation.Server.DualMode = true;
+        reservation.Server.ExclusiveAddressUse = true;
+        reservation.Start();
+        try
+        {
+            var port = ((IPEndPoint)reservation.LocalEndpoint).Port;
+            var set = new ReplicationSet(new ReplicationSetSettings("test", port, false, null, false, [], 1, TimeSpan.FromSeconds(1)));
+
+            Assert.Equal(ThisStatus.Faulted, set.GetReplicationSetStatus().ThisStatus);
+            Assert.Empty(set.GetReplicationSetStatus().NetworkStats);
+        }
+        finally
+        {
+            reservation.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task ServerReturnsToStoppedAfterCancellation()
+    {
+        var server = new Server(0, false, null, message => message);
+        using var cancellation = new CancellationTokenSource();
+        Assert.Equal(Server.ServerState.Stopped, server.State);
+
+        var serverTask = server.StartAsync(cancellation.Token);
+        Assert.Equal(Server.ServerState.started, server.State);
+        cancellation.Cancel();
+        await serverTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(Server.ServerState.Stopped, server.State);
+        Assert.Equal(ThisStatus.Stopped, new ReplicationSet(new RecordingSender()).GetReplicationSetStatus().ThisStatus);
+    }
+
+    [Fact]
     public async Task RemoteDictionaryReceivesChangesWithoutSendingThemBack()
     {
         var sourceSender = new RecordingSender();
         var targetSender = new RecordingSender();
         var source = new ReplicationSet(sourceSender);
         var target = new ReplicationSet(targetSender);
-        var sourceDictionary = source.GetOrCreateDistributedDictionary<string, int>("numbers");
+        var sourceDictionary = source.GetOrCreateDistributedDictionary<string, int>("numbers", (key, local, incoming) => local);
 
         var reservation = new TcpListener(IPAddress.Loopback, 0);
         reservation.Start();
@@ -40,7 +88,7 @@ public class ReplicationTest
         {
             var client = new Protocol("127.0.0.1", port, 1, TimeSpan.FromSeconds(2), false, null);
             await client.SendCommand(sourceSender.Commands[0]);
-            var targetDictionary = target.GetOrCreateDistributedDictionary<string, int>("numbers");
+            var targetDictionary = target.GetOrCreateDistributedDictionary<string, int>("numbers", (key, local, incoming) => local);
             Assert.Empty(targetSender.Commands);
 
             sourceDictionary.Add("one", 1);
@@ -83,11 +131,11 @@ public class ReplicationTest
 
         var first = new ReplicationSet(Settings(firstPort, secondPort));
         var second = new ReplicationSet(Settings(secondPort, firstPort));
-        var firstDictionary = first.GetOrCreateDistributedDictionary<string, int>("shared");
+        var firstDictionary = first.GetOrCreateDistributedDictionary<string, int>("shared", (key, local, incoming) => local);
         firstDictionary.Add("first", 1);
 
         await WaitUntilAsync(() => second.GetAllCollections().Any(c => c.Name == "shared"));
-        var secondDictionary = second.GetOrCreateDistributedDictionary<string, int>("shared");
+        var secondDictionary = second.GetOrCreateDistributedDictionary<string, int>("shared", (key, local, incoming) => local);
         await WaitUntilAsync(() => secondDictionary.TryGetValue("first", out var value) && value == 1);
 
         secondDictionary.Add("second", 2);
@@ -98,7 +146,7 @@ public class ReplicationTest
     public void NullValuesRemainPresentInTheDictionary()
     {
         var set = new ReplicationSet(new RecordingSender());
-        var dictionary = set.GetOrCreateDistributedDictionary<string, string?>("nullable");
+        var dictionary = set.GetOrCreateDistributedDictionary<string, string?>("nullable", (key, local, incoming) => local);
 
         dictionary.Add("key", null);
 
@@ -108,13 +156,56 @@ public class ReplicationTest
     }
 
     [Fact]
+    public void RemoteDictionaryUsesDefaultThenReplacesConflictHandler()
+    {
+        var sourceSender = new RecordingSender();
+        var targetSender = new RecordingSender();
+        var source = new ReplicationSet(sourceSender);
+        var target = new ReplicationSet(targetSender);
+        var sourceDictionary = source.GetOrCreateDistributedDictionary<string, int>("items", (key, local, incoming) => local);
+        var protocol = new Protocol((ICommandReceiver)target);
+
+        Assert.False(Deliver(protocol, sourceSender.Commands[0]).StartsWith("Error:"));
+        sourceDictionary.Add("key", 1);
+        var initial = sourceSender.Commands[^1];
+        Assert.False(Deliver(protocol, initial).StartsWith("Error:"));
+
+        sourceDictionary["key"] = 2;
+        var update = sourceSender.Commands[^1];
+        var conflict = new CommandDTO("items", update.JsonObject, update.Action, initial.ToValueHash ^ 1, update.ToValueHash);
+        Assert.False(Deliver(protocol, conflict).StartsWith("Error:"));
+
+        var calls = 0;
+        var targetDictionary = target.GetOrCreateDistributedDictionary<string, int>("items", (key, local, incoming) =>
+        {
+            calls++;
+            Assert.Equal("key", key);
+            Assert.Equal(1, local);
+            Assert.Equal(2, incoming);
+            return incoming;
+        });
+        Assert.Equal(1, targetDictionary["key"]);
+
+        Assert.False(Deliver(protocol, conflict).StartsWith("Error:"));
+        Assert.Equal(1, calls);
+        Assert.Equal(2, targetDictionary["key"]);
+
+        var sameDictionary = target.GetOrCreateDistributedDictionary<string, int>("items", (key, local, incoming) => local + incoming);
+        Assert.Same(targetDictionary, sameDictionary);
+        Assert.False(Deliver(protocol, conflict).StartsWith("Error:"));
+        Assert.Equal(4, targetDictionary["key"]);
+        Assert.Equal(1, calls);
+        Assert.Empty(targetSender.Commands);
+    }
+
+    [Fact]
     public void RepeatedCreateIsIdempotentButConflictingTypeIsRejected()
     {
         var sender = new RecordingSender();
         var source = new ReplicationSet(sender);
         var targetSender = new RecordingSender();
         var target = new ReplicationSet(targetSender);
-        source.GetOrCreateDistributedDictionary<Guid, string>("items");
+        source.GetOrCreateDistributedDictionary<Guid, string>("items", (key, local, incoming) => local);
         var create = sender.Commands[0];
         var protocol = new Protocol((ICommandReceiver)target);
 
@@ -126,7 +217,7 @@ public class ReplicationTest
         var incompatibleInfo = new DictionaryTypeInfo("DistributedDictionary", typeof(string).AssemblyQualifiedName!, typeof(string).AssemblyQualifiedName!);
         var incompatible = new CommandDTO("items", JsonSerializer.Serialize(incompatibleInfo), ChangeType.CreateCollection, 0, 0);
         Assert.StartsWith("Error:", Deliver(protocol, incompatible));
-        Assert.IsAssignableFrom<IDictionary<Guid, string>>(target.GetOrCreateDistributedDictionary<Guid, string>("items"));
+        Assert.IsAssignableFrom<IDictionary<Guid, string>>(target.GetOrCreateDistributedDictionary<Guid, string>("items", (key, local, incoming) => local));
     }
 
     [Fact]
