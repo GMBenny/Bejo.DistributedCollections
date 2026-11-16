@@ -52,7 +52,6 @@ internal class Client : IDisposable
             {
                 try
                 {
-                    // Create a linked cancellation token with a 2-second timeout for the network operations
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                     timeout.CancelAfter(_timeout);
 

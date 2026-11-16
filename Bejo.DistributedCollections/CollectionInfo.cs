@@ -1,19 +1,4 @@
-using Bejo.DistributedCollections.Contracts;
+using Bejo.DistributedCollections;
 
-
-// TODO: Sikke noget rod - Det skal rydes op
-
-internal interface IDistributedCollection
-{
-}
-
-
-internal interface IDistributedCollectionNode
-{
-    void CommandCallback(CommandDTO command);
-}
-
+// Information about a distributed collection, including its type, the collection itself, and the node it belongs to.
 internal record CollectionInfo(string CollectionType, IDistributedCollection DistributedCollection, IDistributedCollectionNode Node);
-
-
-public record DictionaryTypeInfo(string CollectionType, string KeyType, string ValueType);

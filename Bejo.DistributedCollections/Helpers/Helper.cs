@@ -43,6 +43,7 @@ internal static class Helper
         return hash;
     }
 
+    #region Byte[] functions
     internal static byte[] Encrypt(byte[] data, string password)
     {
         using var aes = Aes.Create();
@@ -86,9 +87,13 @@ internal static class Helper
             using var cs = new CryptoStream(ms, aes.CreateDecryptor(), CryptoStreamMode.Read);
             using var output = new MemoryStream();
             cs.CopyTo(output);
+
+            if (output.Length == 0)
+                return null;
+
             return output.ToArray();
         }
-        catch (Exception)
+        catch (CryptographicException)
         {
             return null;
         }
@@ -103,7 +108,6 @@ internal static class Helper
         }
         return output.ToArray();
     }
-
     internal static byte[]? Decompress(byte[] data)
     {
         try
@@ -114,6 +118,10 @@ internal static class Helper
             {
                 dstream.CopyTo(output);
             }
+
+            if (output.Length == 0) // Probably an error during decompression, return null to indicate failure
+                return null;
+
             return output.ToArray();
         }
         catch (Exception)
@@ -121,4 +129,5 @@ internal static class Helper
             return null;
         }
     }
+    #endregion
 }

@@ -14,9 +14,9 @@ void Print(ReplicationSetStatus replicationSetStatus)
 
 Console.WriteLine("Starting 3 replication sets...");
 
-var rs1 = new Bejo.DistributedCollections.ReplicationSet(new Bejo.DistributedCollections.ReplicationSetSettings("rs1", 10001,true,["abc123abc"],true,[new("localhost", 10002, TimeSpan.FromSeconds(2), true),new("localhost", 10003, TimeSpan.FromSeconds(2), true)],3,TimeSpan.FromSeconds(2)));
-var rs2 = new Bejo.DistributedCollections.ReplicationSet(new Bejo.DistributedCollections.ReplicationSetSettings("rs2", 10002, true, ["abc123abc"], true, [new("localhost", 10001, TimeSpan.FromSeconds(2), true),new("localhost", 10003, TimeSpan.FromSeconds(2), true)], 3, TimeSpan.FromSeconds(2)));
-var rs3 = new Bejo.DistributedCollections.ReplicationSet(new Bejo.DistributedCollections.ReplicationSetSettings("rs3", 10003, true, ["abc123abc"], true, [new("localhost", 10001, TimeSpan.FromSeconds(2), true),new("localhost", 10002, TimeSpan.FromSeconds(2), true)], 3, TimeSpan.FromSeconds(2)));
+var rs1 = new Bejo.DistributedCollections.ReplicationSet(new Bejo.DistributedCollections.ReplicationSetSettings("rs1", 10001,true,["abc123abc"],[new("localhost", 10002, TimeSpan.FromSeconds(2)),new("localhost", 10003, TimeSpan.FromSeconds(2))],3,TimeSpan.FromSeconds(2)));
+var rs2 = new Bejo.DistributedCollections.ReplicationSet(new Bejo.DistributedCollections.ReplicationSetSettings("rs2", 10002, true, ["abc123abc"], [new("localhost", 10001, TimeSpan.FromSeconds(2)),new("localhost", 10003, TimeSpan.FromSeconds(2))], 3, TimeSpan.FromSeconds(2)));
+var rs3 = new Bejo.DistributedCollections.ReplicationSet(new Bejo.DistributedCollections.ReplicationSetSettings("rs3", 10003, true, ["abc123abc"], [new("localhost", 10001, TimeSpan.FromSeconds(2)),new("localhost", 10002, TimeSpan.FromSeconds(2))], 3, TimeSpan.FromSeconds(2)));
 
 do
 {
@@ -29,11 +29,11 @@ do
 
 string h1(int k, ConflictData<string> a, ConflictData<string> b)
 {
-    return b.Value;
+    return a.CreatedTimestamp < b.CreatedTimestamp ? a.Value : b.Value;
 }
 string h2(int k, ConflictData<string> a, ConflictData<string> b)
 {
-    return b.Value;
+    return a.CreatedTimestamp < b.CreatedTimestamp ? a.Value : b.Value;
 }
 
 var d1 = rs1.GetOrCreateDistributedDictionary<int, string>("myDictionary", h1);

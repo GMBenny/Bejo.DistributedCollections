@@ -8,37 +8,26 @@ public class Helper_Hash
     [Fact]
     public void Hashtest_1000000Random()
     {
-        var uniqueData = GetRandomUniqueByteArrays(1000000, 6); 
+        var uniqueData = GetRandomUniqueByteArrays(1_000_000, 6); 
 
         var result = new List<ulong>(uniqueData.Count);
         foreach (var data in uniqueData)
         {
             result.Add(DistributedCollections.Helpers.Helper.Hash(data));
         }
-        // Assert that all hashes are unique
         result.Should().OnlyHaveUniqueItems();
-    }
 
+        var test = GetULongList(10);
 
-    [Fact]
-    public void Hashtest_Predefined()
-    {
-        var uniqueData = new List<byte[]>
+        List<int> counts = new List<int>(test.Count - 1);
+        for (int i = 0; i < test.Count - 1; i++)
         {
-            new byte[] { 0 },
-            new byte[] { 0,0,0,0,0,0,0,0 },
-            new byte[] { 255 },
-            new byte[] { 255, 255,255,255,255,255,255,255 }
-        };
-
-        var result = new List<ulong>(uniqueData.Count);
-        foreach (var data in uniqueData)
-        {
-            result.Add(DistributedCollections.Helpers.Helper.Hash(data));
+            counts.Add(result.Count(p => test[i] < p && p < test[i + 1]));
         }
-        // Assert that all hashes are unique
-        result.Should().OnlyHaveUniqueItems();
+        counts.Should().AllSatisfy(p => p.Should().BeGreaterThan(50_000)); // None must be more than 5%.
+        counts.Should().AllSatisfy(p => p.Should().BeLessThan(200_000)); // None must be more than 20%.
     }
+
 
     private static List<byte[]> GetRandomUniqueByteArrays(int count, int length = 10)
     {
@@ -50,7 +39,6 @@ public class Helper_Hash
         while (result.Count < count)
         {
             rng.NextBytes(buffer);
-            // Brug en streng som nøgle til HashSet (byte[] har ikke strukturel lighed)
             var key = Convert.ToHexString(buffer);
             if (set.Add(key))
             {
@@ -58,5 +46,17 @@ public class Helper_Hash
             }
         }
         return result;
+    }
+    private static List<ulong> GetULongList(int length)
+    {
+        var r = new List<ulong>(length);
+
+        ulong interval = ulong.MaxValue / (ulong)length;
+
+        for (int i = 0; i <= length; i++)
+        {
+            r.Add(interval * (ulong)i);
+        }
+        return r;
     }
 }

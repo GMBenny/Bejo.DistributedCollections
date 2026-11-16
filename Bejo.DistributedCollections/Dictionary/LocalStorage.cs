@@ -1,8 +1,8 @@
 ﻿using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace Bejo.DistributedCollections.Dictionary;
 
+// Holding the value in DistributedCollections along with aditional data
 internal class LocalStorage<TKey, TValue>
 {
     private DataObject _dataObject;

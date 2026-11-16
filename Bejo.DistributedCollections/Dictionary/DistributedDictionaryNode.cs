@@ -4,18 +4,34 @@ using Bejo.DistributedCollections.Contracts;
 
 namespace Bejo.DistributedCollections.Dictionary;
 
-internal class DistributedCollectionNode<TKey, TValue>(string name, ICommandSender commandSender, ReplicationSet.HandleConflict<TKey, TValue> handleConflict) : IDistributedCollectionNode where TKey : notnull
+internal class DistributedDictionaryNode<TKey, TValue>(string name, ICommandSender commandSender, ReplicationSet.HandleConflict<TKey, TValue> handleConflict) : IDistributedCollectionNode where TKey : notnull
 {
     private readonly ConcurrentDictionary<TKey, LocalStorage<TKey, TValue>> _dictionaryReplica = new();
     private ReplicationSet.HandleConflict<TKey, TValue> _handleConflict = handleConflict;
 
     internal ICollection<TKey> Keys => _dictionaryReplica.Keys;
 
-    internal ICollection<TValue> Values => _dictionaryReplica.Values.Select(v => v.Value).ToList();
+    // CoPilot: Expose values as a read-only snapshot because values cannot be added or removed independently of keys.
+    internal ICollection<TValue> Values => Array.AsReadOnly(_dictionaryReplica.Values.Select(v => v.Value).ToArray());
+
+    internal int Count => _dictionaryReplica.Count;
+
+    internal KeyValuePair<TKey, TValue>[] GetSnapshot() =>
+        _dictionaryReplica.Select(pair => new KeyValuePair<TKey, TValue>(pair.Key, pair.Value.Value)).ToArray();
 
     internal void SetConflictHandler(ReplicationSet.HandleConflict<TKey, TValue> handleConflict)
     {
         _handleConflict = handleConflict;
+    }
+
+    internal bool TryAdd(TKey key, TValue value)
+    {
+        var localValue = new LocalStorage<TKey, TValue>(key, value);
+        if (!_dictionaryReplica.TryAdd(key, localValue))
+            return false;
+
+        commandSender.SendCommand(new CommandDTO(name, localValue.JsonString, ChangeType.AddUpdated, 0, localValue.ValueHash));
+        return true;
     }
 
     internal bool TryCreateUpdate(TKey key, TValue value)
