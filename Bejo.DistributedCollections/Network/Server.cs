@@ -5,18 +5,19 @@ namespace Bejo.DistributedCollections.Network;
 
 internal class Server
 {
-    internal enum ServerState { Starting, started, Stopped }
+    internal enum ServerState { Starting, Started, Stopped, Faulted }
 
-    internal ServerState State { get; private set; } = ServerState.Stopped;
+    private volatile ServerState _state = ServerState.Stopped;
+    internal ServerState State => _state;
 
     private readonly int _port;
     private TcpListener? _listener;
     private readonly bool _compress;
-    private readonly List<string>? _passwords;
+    private readonly string[]? _passwords;
 
     private readonly Func<byte[], byte[]> _handleRequest;
 
-    internal Server(int port, bool compress, List<string>? passwords, Func<byte[], byte[]> handleRequest)
+    internal Server(int port, bool compress, string[]? passwords, Func<byte[], byte[]> handleRequest)
     {
         _port = port;
         _handleRequest = handleRequest;
@@ -24,23 +25,28 @@ internal class Server
         _passwords = passwords;
     }
 
+    // Start the server and listen for incoming connections
     internal async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        State = ServerState.Starting;
-
-        _listener = new TcpListener(IPAddress.Any, _port);
-        _listener.Start();
-
-        State = ServerState.started;
+        // Set the server state to Starting
+        _state = ServerState.Starting;
 
         try
         {
+            // Create a TCP listener to listen for incoming connections on the specified port
+            _listener = new TcpListener(IPAddress.IPv6Any, _port);
+            _listener.Server.DualMode = true;
+            _listener.Start();
+
+            // Set the server state to Started
+            _state = ServerState.Started;
+
             while (!cancellationToken.IsCancellationRequested)
             {
                 try
                 {
+                    // Wait for an incoming client connection
                     var client = await _listener.AcceptTcpClientAsync(cancellationToken);
-
                     _ = HandleClientAsync(client, cancellationToken);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -53,18 +59,26 @@ internal class Server
                 }
             }
         }
+        catch
+        {
+            // If an exception occurs during server startup, set the state to Faulted and rethrow the exception
+            _state = ServerState.Faulted;
+            throw;
+        }
         finally
         {
-            _listener.Stop();
+            // Stop the listener and set the state to Stopped if it is not already Faulted
+            _listener?.Stop();
             _listener = null;
+            if (_state != ServerState.Faulted)
+                _state = ServerState.Stopped;
         }
     }
 
+    // Handle communication with a connected client
     private async Task HandleClientAsync(TcpClient client, CancellationToken cancellationToken)
     {
         var remoteEndPoint = client.Client.RemoteEndPoint;
-
-        Console.WriteLine($"Client connected: {remoteEndPoint}");
 
         using (client)
         {
@@ -74,17 +88,17 @@ internal class Server
 
                 while (!cancellationToken.IsCancellationRequested)
                 {
-                    // Afvent og læs beskred fra client
+                    // Wait for and read a message from the client
                     var message = await NetworkMessageFraming.ReadAsync(stream, cancellationToken);
 
                     if (message == null)
                     {
-                        break;  // Luk forbindelsen til klienten ved at bryde while loopet
+                        break;  // Close the connection to the client by breaking the while loop
                     }
                     else
                     {
-                        // Hvis der er valgt at kryptere, så forsøg at dekryptere beskeden.
-                        if(_passwords != null && _passwords.Count > 0)
+                        // If encryption is enabled, attempt to decrypt the message.
+                        if(_passwords != null && _passwords.Length > 0)
                         {
                             byte[]? messageDecrypted = null;
 
@@ -96,9 +110,9 @@ internal class Server
                                     message = messageDecrypted;
                                 else
                                     i++;
-                            } while (messageDecrypted == null && i < _passwords.Count);
+                            } while (messageDecrypted == null && i < _passwords.Length);
 
-                            // Hvis dekrypteringen fejler, send en fejlbesked til klienten.
+                            // If decryption fails, send an error message to the client.
                             if (messageDecrypted == null)
                             {
                                 message = null;
@@ -106,12 +120,12 @@ internal class Server
                             }
                         }
 
-                        // Hvis der er valgt at komprimere, så dekomprimer beskeden.
+                        // If compression is enabled, decompress the message.
                         if(_compress && message != null)
                         {
                             message = Helpers.Helper.Decompress(message);
 
-                            // Hvis dekomprimeringen fejler, send en fejlbesked til klienten.
+                            // If decompression fails, send an error message to the client.
                             if (message == null)
                                 await NetworkMessageFraming.WriteAsync(stream, System.Text.Encoding.UTF8.GetBytes("Failed to decompress message."), cancellationToken);
                         }
@@ -126,16 +140,16 @@ internal class Server
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                // Serveren lukker ned.
+                // The server is shutting down.
             }
             catch (IOException ex)
             {
-                // Klienten har eksempelvis afbrudt forbindelsen.
+                // The client has, for example, disconnected.
                 Console.WriteLine($"Client communication error: {ex.Message}");
             }
             catch (Exception ex)
             {
-                // En uventet fejl i håndteringen af denne klient.
+                // An unexpected error occurred while handling this client.
                 Console.WriteLine($"Client handler error: {ex}");
             }
         }
