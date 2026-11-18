@@ -40,8 +40,6 @@ public class ReplicationSetTest
         Assert.Equal("Hello from NodeA", messageReceived);
     }
 
-
-
     [Fact]
     public async Task SendMessage_WithPassword_MessageReceived()
     {
@@ -58,7 +56,6 @@ public class ReplicationSetTest
 
         Assert.Equal("Hello from NodeA", messageReceived);
     }
-
 
     [Fact]
     public async Task SendMessage_WithPasswordUpdate_MessageReceived()

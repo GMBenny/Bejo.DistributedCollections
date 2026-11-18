@@ -1,4 +1,5 @@
-﻿using FluentAssertions;
+﻿using Bejo.DistributedCollections.Dictionary;
+using FluentAssertions;
 using Xunit.Abstractions;
 
 namespace Bejo.DistributedCollections_Tests;
@@ -517,6 +518,40 @@ public class DistributedDictionaryTest
 
         _output.WriteLine($"Replication time: {sw.Elapsed.TotalMilliseconds:F4} ms");
         sw.ElapsedMilliseconds.Should().BeLessThan(100);
+    }
+    #endregion
+
+    #region Events - Port: 1221*
+    [Fact]
+    public async Task ChangeData_Shunshine_Events()
+    {
+        int? testKey = null;
+
+        var rs1 = new DistributedCollections.ReplicationSet(
+            new DistributedCollections.ReplicationSetSettings("rs1", 12210, false, null, [new("localhost", 12211, TimeSpan.FromSeconds(2))], 3, TimeSpan.FromSeconds(2)));
+        var rs2 = new DistributedCollections.ReplicationSet(
+            new DistributedCollections.ReplicationSetSettings("rs2", 12211, false, null, [new("localhost", 12210, TimeSpan.FromSeconds(2))], 3, TimeSpan.FromSeconds(2)));
+
+        await WaitForReplicationSetToStart([rs1, rs2]);
+
+        var dict1 = rs1.GetOrCreateDistributedDictionary<int, string>("d1", HandleConflict);
+        var dict2 = rs2.GetOrCreateDistributedDictionary<int, string>("d1", HandleConflict);
+
+        // Setup event handler for dict2
+        dict2.Changed += (sender, args) =>
+        {
+            testKey = args.Key;
+        };
+
+        // Add data to dict1, which should trigger the event in dict2
+        dict1.Add(12, "Twelve");
+
+        // Wait for replication and event handling
+        await Task.Delay(100);
+
+        // testKey should now be set to 12 
+        testKey.Should().NotBeNull();
+        testKey.Should().Be(12);
     }
     #endregion
 
