@@ -74,29 +74,29 @@ public class ReplicationSetTest
         await Task.Delay(100); // Give some time for the message to be received
         Assert.Equal("Hello from NodeA", messageReceived);
 
-        // Two passwords to the recieving node - Encrypts with the first password, decrypts with either of the two passwords
-        rs2.UpdatePassword(["password", "newpassword"]);
+        // Two master keys to the receiving node - Encrypts with the first master key, decrypts with either of the two master keys
+        rs2.UpdateMasterKeys(["password", "newpassword"]);
 
         await rs1.SendMessage("Hello from NodeA");
         await Task.Delay(100); // Give some time for the message to be received
         Assert.Equal("Hello from NodeA", messageReceived);
 
-        // Two passwords to the sending node - Encrypts with the first password, decrypts with either of the two passwords
-        rs1.UpdatePassword(["password", "newpassword"]);
+        // Two master keys to the sending node - Encrypts with the first master key, decrypts with either of the two master keys
+        rs1.UpdateMasterKeys(["password", "newpassword"]);
 
         await rs1.SendMessage("Hello from NodeA");
         await Task.Delay(100); // Give some time for the message to be received
         Assert.Equal("Hello from NodeA", messageReceived);
 
-        // Remove old password
-        rs2.UpdatePassword(["newpassword"]);
+        // Remove old master key
+        rs2.UpdateMasterKeys(["newpassword"]);
 
         await rs1.SendMessage("Hello from NodeA");
         await Task.Delay(100); // Give some time for the message to be received
         Assert.Equal("Hello from NodeA", messageReceived);
 
-        // Remove old password
-        rs1.UpdatePassword(["newpassword"]);
+        // Remove old master key
+        rs1.UpdateMasterKeys(["newpassword"]);
 
         await rs1.SendMessage("Hello from NodeA");
         await Task.Delay(100); // Give some time for the message to be received

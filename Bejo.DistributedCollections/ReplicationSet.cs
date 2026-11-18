@@ -36,9 +36,9 @@ public class ReplicationSet : ICommandReceiver
         _replicationManager.Start();
     }
 
-    public void UpdatePassword(string[]? passwords)
+    public void UpdateMasterKeys(string[]? masterKeys)
     {
-        _replicationSetSettings = _replicationSetSettings with { passwords = passwords };
+        _replicationSetSettings = _replicationSetSettings with { masterKeys = masterKeys };
     }
 
     #region Local information

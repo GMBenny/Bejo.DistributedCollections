@@ -44,12 +44,12 @@ internal static class Helper
     }
 
     #region Byte[] functions
-    internal static byte[] Encrypt(byte[] data, string password)
+    internal static byte[] Encrypt(byte[] data, string masterKey)
     {
         using var aes = Aes.Create();
         var salt = RandomNumberGenerator.GetBytes(16);
         var encryptionKey = Rfc2898DeriveBytes.Pbkdf2(
-            password,
+            masterKey,
             salt,
             100_000,
             HashAlgorithmName.SHA256,
@@ -66,7 +66,7 @@ internal static class Helper
         }
         return ms.ToArray();
     }
-    internal static byte[]? Decrypt(byte[] data, string password)
+    internal static byte[]? Decrypt(byte[] data, string masterKey)
     {
         try
         {
@@ -77,7 +77,7 @@ internal static class Helper
             var iv = new byte[aes.BlockSize / 8];
             ms.Read(iv, 0, iv.Length);
             var encryptionKey = Rfc2898DeriveBytes.Pbkdf2(
-                password,
+                masterKey,
                 salt,
                 100_000,
                 HashAlgorithmName.SHA256,

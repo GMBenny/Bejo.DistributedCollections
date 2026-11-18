@@ -13,16 +13,16 @@ internal class Server
     private readonly int _port;
     private TcpListener? _listener;
     private readonly bool _compress;
-    private readonly string[]? _passwords;
+    private readonly string[]? _masterKeys;
 
     private readonly Func<byte[], byte[]> _handleRequest;
 
-    internal Server(int port, bool compress, string[]? passwords, Func<byte[], byte[]> handleRequest)
+    internal Server(int port, bool compress, string[]? masterKeys, Func<byte[], byte[]> handleRequest)
     {
         _port = port;
         _handleRequest = handleRequest;
         _compress = compress;
-        _passwords = passwords;
+        _masterKeys = masterKeys;
     }
 
     // Start the server and listen for incoming connections
@@ -98,19 +98,19 @@ internal class Server
                     else
                     {
                         // If encryption is enabled, attempt to decrypt the message.
-                        if(_passwords != null && _passwords.Length > 0)
+                        if(_masterKeys != null && _masterKeys.Length > 0)
                         {
                             byte[]? messageDecrypted = null;
 
                             int i =0;
                             do
                             {
-                                messageDecrypted = Helpers.Helper.Decrypt(message, _passwords[i]);
+                                messageDecrypted = Helpers.Helper.Decrypt(message, _masterKeys[i]);
                                 if (messageDecrypted != null)
                                     message = messageDecrypted;
                                 else
                                     i++;
-                            } while (messageDecrypted == null && i < _passwords.Length);
+                            } while (messageDecrypted == null && i < _masterKeys.Length);
 
                             // If decryption fails, send an error message to the client.
                             if (messageDecrypted == null)

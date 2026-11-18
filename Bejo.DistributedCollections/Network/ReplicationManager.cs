@@ -20,12 +20,12 @@ internal class ReplicationManager : ICommandSender
     public ReplicationManager(ReplicationSetSettings replicationSetSettings, ICommandReceiver receiver)
     {
         // Creates server and the delegate to handle incoming messages.
-        _server = new Server(replicationSetSettings.listenerPort, replicationSetSettings.compressData, replicationSetSettings.passwords, new Protocol(receiver).MessageHandler);
+        _server = new Server(replicationSetSettings.listenerPort, replicationSetSettings.compressData, replicationSetSettings.masterKeys, new Protocol(receiver).MessageHandler);
 
         // Start client through CommandHandlers and Protocol
         foreach (var nodeSettings in replicationSetSettings.nodes)
         {
-            _commandhandlers.Add(new CommandHandler(nodeSettings, replicationSetSettings.retryCount, replicationSetSettings.timeout, replicationSetSettings.compressData, replicationSetSettings.passwords?.FirstOrDefault(), CancellationToken.None));
+            _commandhandlers.Add(new CommandHandler(nodeSettings, replicationSetSettings.retryCount, replicationSetSettings.timeout, replicationSetSettings.compressData, replicationSetSettings.masterKeys?.FirstOrDefault(), CancellationToken.None));
         }
     }
 

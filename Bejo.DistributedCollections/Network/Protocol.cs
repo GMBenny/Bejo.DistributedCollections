@@ -13,9 +13,9 @@ internal class Protocol
     private string Address = "";
 
     // Constructor for Clients
-    internal Protocol(string host, int port, int retryCount, TimeSpan timeout, bool compress, string? password)
+    internal Protocol(string host, int port, int retryCount, TimeSpan timeout, bool compress, string? masterKey)
     {
-        _client = new Client(host, port, retryCount, timeout, compress, password);
+        _client = new Client(host, port, retryCount, timeout, compress, masterKey);
         Address = $"{host}:{port}";
     }
 

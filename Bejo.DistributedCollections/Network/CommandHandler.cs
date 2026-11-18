@@ -23,10 +23,10 @@ internal class CommandHandler
 
     private readonly Protocol _protocol;
 
-    internal CommandHandler(NodeSettings nodeSettings, int retryCount, TimeSpan timeout, bool compress, string? password, CancellationToken cancellationToken)
+    internal CommandHandler(NodeSettings nodeSettings, int retryCount, TimeSpan timeout, bool compress, string? masterKey, CancellationToken cancellationToken)
     {
         _nodeSettings = nodeSettings;
-        _protocol = new Protocol(_nodeSettings.Host, _nodeSettings.Port, retryCount, timeout, compress, password);
+        _protocol = new Protocol(_nodeSettings.Host, _nodeSettings.Port, retryCount, timeout, compress, masterKey);
 
         _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _signal.Release();
