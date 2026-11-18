@@ -1,9 +1,16 @@
 ﻿using FluentAssertions;
+using Xunit.Abstractions;
 
 namespace Bejo.DistributedCollections_Tests;
 
 public class DistributedDictionaryTest
 {
+    private readonly ITestOutputHelper _output;
+    public DistributedDictionaryTest(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
     #region CREATE - Port: 1200*
     [Fact]
     public async Task Add_Sunshine_GetData()
@@ -485,7 +492,34 @@ public class DistributedDictionaryTest
         dict2[1].Should().Be("ONE");
     }
     #endregion
-    
+
+    #region Replication speed - Port: 122**
+    [Fact]
+    public async Task ReplicationSpeed_Sunshine_GetData()
+    {
+        var (dict1, dict2) = await CreateDistributedDictionary(12200, 12201);
+
+        dict1.Add(0, "init");
+
+        await Task.Delay(100);
+
+        dict1.Add(1, "one");
+        dict1[1].Should().Be("one");
+
+        var sw = new System.Diagnostics.Stopwatch();
+        sw.Start();
+        do
+        {
+            await Task.Delay(1);
+        } while (!dict2.TryGetValue(1, out var value));
+
+        sw.Stop();
+
+        _output.WriteLine($"Replication time: {sw.Elapsed.TotalMilliseconds:F4} ms");
+        sw.ElapsedMilliseconds.Should().BeLessThan(100);
+    }
+    #endregion
+
     #region HELPER METHODS
     private string HandleConflict(int key, DistributedCollections.ConflictData<string> a, DistributedCollections.ConflictData<string> b)
     {
