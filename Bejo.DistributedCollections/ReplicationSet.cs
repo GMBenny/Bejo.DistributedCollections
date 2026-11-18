@@ -76,7 +76,7 @@ public class ReplicationSet : ICommandReceiver
     public delegate TValue HandleConflict<TKey, TValue>(TKey key, ConflictData<TValue> localValue, ConflictData<TValue> distributedValue);
 
     // Creates or retrieves a distributed dictionary with the specified name and conflict handler
-    public IDictionary<TKey, TValue> GetOrCreateDistributedDictionary<TKey, TValue>(string name, HandleConflict<TKey, TValue> handleConflict) where TKey : notnull
+    public DistributedDictionary<TKey, TValue> GetOrCreateDistributedDictionary<TKey, TValue>(string name, HandleConflict<TKey, TValue> handleConflict) where TKey : notnull
     {
         ValidateKeyType(typeof(TKey));
         ArgumentNullException.ThrowIfNull(handleConflict);
@@ -90,7 +90,7 @@ public class ReplicationSet : ICommandReceiver
                     existing.Node is DistributedDictionaryNode<TKey, TValue> node)
                 {
                     node.SetConflictHandler(handleConflict);
-                    return dictionary;
+                    return (DistributedDictionary<TKey, TValue>)dictionary;
                 }
 
                 throw new InvalidOperationException($"The collection with name '{name}' is not a distributed dictionary");
@@ -103,7 +103,7 @@ public class ReplicationSet : ICommandReceiver
             var jsonObject = JsonSerializer.Serialize(typeInfo);
             _commandSender.SendCommand(new CommandDTO(name, jsonObject, ChangeType.CreateCollection, 0, 0));
 
-            return (IDictionary<TKey, TValue>)collection.DistributedCollection;
+            return (DistributedDictionary<TKey, TValue>)collection.DistributedCollection;
         }
     }
     private CollectionInfo CreateDictionary<TKey, TValue>(string name, HandleConflict<TKey, TValue> handleConflict) where TKey : notnull

@@ -1,6 +1,6 @@
+using Bejo.DistributedCollections.Contracts;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
-using Bejo.DistributedCollections.Contracts;
 
 namespace Bejo.DistributedCollections.Dictionary;
 
@@ -16,8 +16,9 @@ internal class DistributedDictionaryNode<TKey, TValue>(string name, ICommandSend
 
     internal int Count => _dictionaryReplica.Count;
 
-    internal KeyValuePair<TKey, TValue>[] GetSnapshot() =>
-        _dictionaryReplica.Select(pair => new KeyValuePair<TKey, TValue>(pair.Key, pair.Value.Value)).ToArray();
+    internal event EventHandler<DictionaryChangedEventArgs<TKey>>? Changed;
+
+    internal KeyValuePair<TKey, TValue>[] GetSnapshot() => _dictionaryReplica.Select(pair => new KeyValuePair<TKey, TValue>(pair.Key, pair.Value.Value)).ToArray();
 
     internal void SetConflictHandler(ReplicationSet.HandleConflict<TKey, TValue> handleConflict)
     {
@@ -103,20 +104,26 @@ internal class DistributedDictionaryNode<TKey, TValue>(string name, ICommandSend
                     if (existingValue.ValueHash == command.FromValueHash)
                     {
                         _dictionaryReplica[l.Key] = l;
-                        // TODO: Fyr event af, så brugeren ved dette objekt er blevet opdateret via netwærket.
+
+                        // Fire event when data-change from remote source
+                        Changed?.Invoke(this, new DictionaryChangedEventArgs<TKey>(l.Key, command.Action.ToString()));
                     }
                     else
                     {
-                        // Der er sket en konflikt - håndter det - Kald brugeren, som skal fixe det
-                        //Console.WriteLine($"Conflict detected for key {l.Key}. Existing value hash: {existingValue.ValueHash}, incoming value hash: {command.FromValueHash}");
+                        // handle conflict using the provided delegate
                         var resolvedValue = _handleConflict(l.Key, new ConflictData<TValue>(existingValue.ValueHash, existingValue.LastChangedUTC, existingValue.Value), new ConflictData<TValue>(l.ValueHash, l.LastChangedUTC, l.Value));
                         _dictionaryReplica[l.Key] = new LocalStorage<TKey, TValue>(l.Key, resolvedValue);
+
+                        // Fire event when data-change from remote source
+                        Changed?.Invoke(this, new DictionaryChangedEventArgs<TKey>(l.Key, command.Action.ToString()));
                     }
                 }
                 else
                 {
                     _dictionaryReplica.TryAdd(l.Key, l);
-                    // TODO: Fyr event af, så brugeren ved dette objekt er blevet opdateret via netwærket.
+
+                    // Fire event when data-change from remote source
+                    Changed?.Invoke(this, new DictionaryChangedEventArgs<TKey>(l.Key, command.Action.ToString()));
                 }
 
                 break;

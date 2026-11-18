@@ -8,10 +8,13 @@ public class DistributedDictionary<TKey, TValue> : IDictionary<TKey, TValue>, ID
     // Reference to the distributed dictionary node that manages the underlying data.
     private readonly DistributedDictionaryNode<TKey, TValue> _node;
 
+    public event EventHandler<DictionaryChangedEventArgs<TKey>>? Changed;
+
     // Kept internal, so only ReplicationSet can create instances of DistributedDictionary.
     internal DistributedDictionary(DistributedDictionaryNode<TKey, TValue> node)
     {
         _node = node;
+        _node.Changed += HandleNodeChanged;
     }
 
     #region IDistributedCollection Members
@@ -102,5 +105,14 @@ public class DistributedDictionary<TKey, TValue> : IDictionary<TKey, TValue>, ID
     {
         return GetEnumerator();
     }
+    #endregion
+
+    #region Additional Methods
+
+    private void HandleNodeChanged(object? sender, DictionaryChangedEventArgs<TKey> eventArgs)
+    {
+        Changed?.Invoke(this, eventArgs);
+    }
+
     #endregion
 }
