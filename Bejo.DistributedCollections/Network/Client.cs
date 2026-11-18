@@ -20,17 +20,17 @@ internal class Client : IDisposable
 
     // Compression and encryption settings
     private readonly bool _compress;
-    private readonly string? _password;
+    private readonly string? _masterKey;
 
 
-    internal Client(string host, int port, int retryCount, TimeSpan timeout, bool compress, string? password)
+    internal Client(string host, int port, int retryCount, TimeSpan timeout, bool compress, string? masterKey)
     {
         _host = host;
         _port = port;
         _retryCount = retryCount;
         _timeout = timeout;
         _compress = compress;
-        _password = password;
+        _masterKey = masterKey;
     }
 
     internal async Task<byte[]> SendAsync(byte[] message, CancellationToken cancellationToken = default)
@@ -39,9 +39,9 @@ internal class Client : IDisposable
         {
             message = Helpers.Helper.Compress(message);
         }
-        if (!string.IsNullOrWhiteSpace(_password))
+        if (!string.IsNullOrWhiteSpace(_masterKey))
         {
-            message = Helpers.Helper.Encrypt(message, _password);
+            message = Helpers.Helper.Encrypt(message, _masterKey);
         }
 
         await _sendLock.WaitAsync(cancellationToken);

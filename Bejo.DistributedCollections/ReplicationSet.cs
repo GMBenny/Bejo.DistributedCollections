@@ -14,23 +14,31 @@ public class ReplicationSet : ICommandReceiver
     private readonly Dictionary<string, CollectionInfo> _distributedCollections = new();
 
     // ReplicationSet settings
-    private readonly ReplicationSetSettings _replicationSetSettings;
+    private ReplicationSetSettings _replicationSetSettings;
 
     // Manages server and client communication for replication
-    private readonly ReplicationManager? _replicationManager;
+    private readonly ReplicationManager _replicationManager;
 
     // Low-coupling interface for sending commands to other nodes in the replication set
     private readonly ICommandSender _commandSender;
-    
+
+    private readonly Action<string>? _messageHandler;
+
 
     // Create a new ReplicationSet with the specified settings, initializing the replication manager and command sender
-    public ReplicationSet(ReplicationSetSettings replicationSetSettings)
+    public ReplicationSet(ReplicationSetSettings replicationSetSettings, Action<string>? messageHandler = null)
     {
         ArgumentNullException.ThrowIfNull(replicationSetSettings);
         _replicationSetSettings = replicationSetSettings;
         _replicationManager = new ReplicationManager(replicationSetSettings, this);
         _commandSender = _replicationManager;
+        _messageHandler = messageHandler;
         _replicationManager.Start();
+    }
+
+    public void UpdateMasterKeys(string[]? masterKeys)
+    {
+        _replicationSetSettings = _replicationSetSettings with { masterKeys = masterKeys };
     }
 
     #region Local information
@@ -54,6 +62,12 @@ public class ReplicationSet : ICommandReceiver
             _ => ThisStatus.Stopped
         };
         return new ReplicationSetStatus(_replicationSetSettings.nodeName, thisStatus, _replicationManager?.GetNetworkStats() ?? Array.Empty<NetworkStat>());
+    }
+
+    // Send a message to all nodes in the replication set
+    public async Task SendMessage(string message)
+    {
+        await _replicationManager.SendMessage(message);
     }
     #endregion
 
@@ -122,7 +136,6 @@ public class ReplicationSet : ICommandReceiver
     }
     #endregion
 
-
     #region ICommandReceiver Implementation
     private readonly object _collectionsLock = new();
 
@@ -156,6 +169,11 @@ public class ReplicationSet : ICommandReceiver
             else if (_distributedCollections.TryGetValue(command.CollectionName, out var collection))
             {
                 collection.Node.CommandCallback(command);
+            }
+            else if(command.Action == ChangeType.Message)
+            {
+                // Handle system message
+                _messageHandler?.Invoke(command.JsonObject);
             }
             else
             {
