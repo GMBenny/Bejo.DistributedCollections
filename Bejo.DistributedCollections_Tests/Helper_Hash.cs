@@ -1,14 +1,13 @@
 using FluentAssertions;
 
-
 namespace Bejo.DistributedCollections_Tests;
 
 public class Helper_Hash
 {
     [Fact]
-    public void Hashtest_1000000Random()
+    public void Hashtest_3000000Random()
     {
-        var uniqueData = GetRandomUniqueByteArrays(1_000_000, 6); 
+        var uniqueData = GetRandomUniqueByteArrays(3_000_000, 6); 
 
         var result = new List<ulong>(uniqueData.Count);
         foreach (var data in uniqueData)
@@ -17,15 +16,18 @@ public class Helper_Hash
         }
         result.Should().OnlyHaveUniqueItems();
 
-        var test = GetULongList(10);
+        var test = GetULongList(40);
 
         List<int> counts = new List<int>(test.Count - 1);
         for (int i = 0; i < test.Count - 1; i++)
         {
             counts.Add(result.Count(p => test[i] < p && p < test[i + 1]));
         }
-        counts.Should().AllSatisfy(p => p.Should().BeGreaterThan(50_000)); // None must be more than 5%.
-        counts.Should().AllSatisfy(p => p.Should().BeLessThan(200_000)); // None must be more than 20%.
+
+        result.Should().HaveCount(3_000_000);
+        counts.Sum().Should().Be(3_000_000);
+        counts.Should().AllSatisfy(p => p.Should().BeGreaterThan(70_000)); // 3000000/40 = 75_000, so none must be less than 70_000 (-6,7%)
+        counts.Should().AllSatisfy(p => p.Should().BeLessThan(80_000)); // 3000000/40 = 75_000, so none must be more than 80_000 (+6,7%)
     }
 
 

@@ -14,18 +14,18 @@ void Print(ReplicationSetStatus replicationSetStatus)
 
 Console.WriteLine("Starting 3 replication sets...");
 
-var rs1 = new Bejo.DistributedCollections.ReplicationSet(new Bejo.DistributedCollections.ReplicationSetSettings("rs1", 10001,true,["abc123abc"],[new("localhost", 10002, TimeSpan.FromSeconds(2)),new("localhost", 10003, TimeSpan.FromSeconds(2))],3,TimeSpan.FromSeconds(2)));
-var rs2 = new Bejo.DistributedCollections.ReplicationSet(new Bejo.DistributedCollections.ReplicationSetSettings("rs2", 10002, true, ["abc123abc"], [new("localhost", 10001, TimeSpan.FromSeconds(2)),new("localhost", 10003, TimeSpan.FromSeconds(2))], 3, TimeSpan.FromSeconds(2)));
-var rs3 = new Bejo.DistributedCollections.ReplicationSet(new Bejo.DistributedCollections.ReplicationSetSettings("rs3", 10003, true, ["abc123abc"], [new("localhost", 10001, TimeSpan.FromSeconds(2)),new("localhost", 10002, TimeSpan.FromSeconds(2))], 3, TimeSpan.FromSeconds(2)));
+var rs1 = new ReplicationSet(new ("rs1", 10001,true,["abc123abc"],[new("localhost", 10002, TimeSpan.FromSeconds(2)),new("localhost", 10003, TimeSpan.FromSeconds(2))],3,TimeSpan.FromSeconds(2)));
+var rs2 = new ReplicationSet(new ("rs2", 10002, true, ["abc123abc"], [new("localhost", 10001, TimeSpan.FromSeconds(2)),new("localhost", 10003, TimeSpan.FromSeconds(2))], 3, TimeSpan.FromSeconds(2)));
+var rs3 = new ReplicationSet(new ("rs3", 10003, true, ["abc123abc"], [new("localhost", 10001, TimeSpan.FromSeconds(2)),new("localhost", 10002, TimeSpan.FromSeconds(2))], 3, TimeSpan.FromSeconds(2)));
 
 do
 {
     Console.WriteLine($"Replication set status: rs1={rs1.GetReplicationSetStatus().ThisStatus}, rs2={rs2.GetReplicationSetStatus().ThisStatus}, rs3={rs3.GetReplicationSetStatus().ThisStatus}");
 
     await Task.Delay(25);
-} while (rs1.GetReplicationSetStatus().ThisStatus != Bejo.DistributedCollections.ThisStatus.Started || 
-         rs2.GetReplicationSetStatus().ThisStatus != Bejo.DistributedCollections.ThisStatus.Started || 
-         rs3.GetReplicationSetStatus().ThisStatus  != Bejo.DistributedCollections.ThisStatus.Started);
+} while (rs1.GetReplicationSetStatus().ThisStatus != ThisStatus.Started || 
+         rs2.GetReplicationSetStatus().ThisStatus != ThisStatus.Started || 
+         rs3.GetReplicationSetStatus().ThisStatus  != ThisStatus.Started);
 
 string h1(int k, ConflictData<string> a, ConflictData<string> b)
 {
@@ -41,6 +41,23 @@ var d2 = rs2.GetOrCreateDistributedDictionary<int, string>("myDictionary", h2);
 
 d1.TryAdd(1, "one");
 d2.TryAdd(1, "two");
+
+// Create - Add
+d1.Add(2, "two");
+var b1 = d1.TryAdd(3, "three");
+
+// Read
+var v1 = d1[1];
+var b2 = d1.TryGetValue(1, out var value);
+
+// Update
+d1[1] = "ONE";
+
+// Delete
+d1.Remove(2);
+
+
+
 
 Console.WriteLine($"D1: Key 1: {d1[1]} / {d2[1]}");
 
