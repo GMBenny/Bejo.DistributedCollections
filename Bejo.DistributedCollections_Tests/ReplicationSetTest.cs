@@ -22,4 +22,95 @@ public class ReplicationSetTest
         Assert.Equal(ThisStatus.Started, status.ThisStatus);
         Assert.Equal(NetworkStatus.Offline, Assert.Single(status.NetworkStats).LastStatus);
     }
+
+    [Fact]
+    public async Task SendMessage_Sunshine_MessageReceived()
+    {
+        string messageReceived = string.Empty;
+
+        var rs1 = new ReplicationSet(new ReplicationSetSettings("NodeA", 13010, false, null, [new NodeSettings("localhost", 13011, TimeSpan.FromMinutes(1))], 3, new TimeSpan(0, 0, 2)));
+        var rs2 = new ReplicationSet(new ReplicationSetSettings("NodeB", 13011, false, null, [new NodeSettings("localhost", 13010, TimeSpan.FromMinutes(1))], 3, new TimeSpan(0, 0, 2)), message => messageReceived = message);
+
+        await WaitForReplicationSetToStart([rs1, rs2]);
+
+        await rs1.SendMessage("Hello from NodeA");
+
+        await Task.Delay(100); // Give some time for the message to be received
+
+        Assert.Equal("Hello from NodeA", messageReceived);
+    }
+
+
+
+    [Fact]
+    public async Task SendMessage_WithPassword_MessageReceived()
+    {
+        string messageReceived = string.Empty;
+
+        var rs1 = new ReplicationSet(new ReplicationSetSettings("NodeA", 13012, false, ["password"], [new NodeSettings("localhost", 13013, TimeSpan.FromMinutes(1))], 3, new TimeSpan(0, 0, 2)));
+        var rs2 = new ReplicationSet(new ReplicationSetSettings("NodeB", 13013, false, ["password"], [new NodeSettings("localhost", 13012, TimeSpan.FromMinutes(1))], 3, new TimeSpan(0, 0, 2)), message => messageReceived = message);
+
+        await WaitForReplicationSetToStart([rs1, rs2]);
+
+        await rs1.SendMessage("Hello from NodeA");
+
+        await Task.Delay(100); // Give some time for the message to be received
+
+        Assert.Equal("Hello from NodeA", messageReceived);
+    }
+
+
+    [Fact]
+    public async Task SendMessage_WithPasswordUpdate_MessageReceived()
+    {
+        string messageReceived = string.Empty;
+
+        var rs1 = new ReplicationSet(new ReplicationSetSettings("NodeA", 13014, false, ["password"], [new NodeSettings("localhost", 13015, TimeSpan.FromMinutes(1))], 3, new TimeSpan(0, 0, 2)));
+        var rs2 = new ReplicationSet(new ReplicationSetSettings("NodeB", 13015, false, ["password"], [new NodeSettings("localhost", 13014, TimeSpan.FromMinutes(1))], 3, new TimeSpan(0, 0, 2)), message => messageReceived = message);
+
+        await WaitForReplicationSetToStart([rs1, rs2]);
+
+        await rs1.SendMessage("Hello from NodeA");
+        await Task.Delay(100); // Give some time for the message to be received
+        Assert.Equal("Hello from NodeA", messageReceived);
+
+        // Two passwords to the recieving node - Encrypts with the first password, decrypts with either of the two passwords
+        rs2.UpdatePassword(["password", "newpassword"]);
+
+        await rs1.SendMessage("Hello from NodeA");
+        await Task.Delay(100); // Give some time for the message to be received
+        Assert.Equal("Hello from NodeA", messageReceived);
+
+        // Two passwords to the sending node - Encrypts with the first password, decrypts with either of the two passwords
+        rs1.UpdatePassword(["password", "newpassword"]);
+
+        await rs1.SendMessage("Hello from NodeA");
+        await Task.Delay(100); // Give some time for the message to be received
+        Assert.Equal("Hello from NodeA", messageReceived);
+
+        // Remove old password
+        rs2.UpdatePassword(["newpassword"]);
+
+        await rs1.SendMessage("Hello from NodeA");
+        await Task.Delay(100); // Give some time for the message to be received
+        Assert.Equal("Hello from NodeA", messageReceived);
+
+        // Remove old password
+        rs1.UpdatePassword(["newpassword"]);
+
+        await rs1.SendMessage("Hello from NodeA");
+        await Task.Delay(100); // Give some time for the message to be received
+        Assert.Equal("Hello from NodeA", messageReceived);
+    }
+
+    private async Task WaitForReplicationSetToStart(ReplicationSet[] rs)
+    {
+        foreach (var r in rs)
+        {
+            while (r.GetReplicationSetStatus().ThisStatus != ThisStatus.Started)
+            {
+                await Task.Delay(25);
+            }
+        }
+    }
 }

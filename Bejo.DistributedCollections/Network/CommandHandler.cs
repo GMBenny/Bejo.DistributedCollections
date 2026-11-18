@@ -88,4 +88,9 @@ internal class CommandHandler
             NetworkStat = await _protocol.SendPingAsync();
         }
     }
+
+    internal async Task SendMessage(string message)
+    {
+        await _protocol.SendSystemMessage(message);
+    }
 }

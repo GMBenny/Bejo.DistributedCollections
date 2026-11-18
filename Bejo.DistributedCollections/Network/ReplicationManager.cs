@@ -43,4 +43,12 @@ internal class ReplicationManager : ICommandSender
             c.SendCommand(changeDto);
         }
     }
+
+    internal async Task SendMessage(string message)
+    {
+        foreach (var c in _commandhandlers)
+        {
+            await c.SendMessage(message);
+        }
+    }
 }   
