@@ -12,6 +12,7 @@ public class ReplicationSet : ICommandReceiver
 {
     // Local storage for all distributed collections, keyed by collection name
     private readonly Dictionary<string, CollectionInfo> _distributedCollections = new();
+    private readonly Dictionary<string, string> _recreateCollectionMetadata = new();
 
     // ReplicationSet settings
     private ReplicationSetSettings _replicationSetSettings;
@@ -29,11 +30,40 @@ public class ReplicationSet : ICommandReceiver
     public ReplicationSet(ReplicationSetSettings replicationSetSettings, Action<string>? messageHandler = null)
     {
         ArgumentNullException.ThrowIfNull(replicationSetSettings);
+
+        if (replicationSetSettings.persistPath != null && !Directory.Exists(replicationSetSettings.persistPath))
+            throw new ArgumentException("Persist path must exist or be null.", nameof(replicationSetSettings.persistPath));
+
         _replicationSetSettings = replicationSetSettings;
         _replicationManager = new ReplicationManager(replicationSetSettings, this);
         _commandSender = _replicationManager;
         _messageHandler = messageHandler;
+
+        // TODO: Set status
+
+        // Ikke helt godt nok til at skabe en brugbar collection, da vi ikke har synkroniseret med andre noder endnu. Vi skal vente på at alle noder er startet og har synkroniseret deres collections.
+        if (replicationSetSettings.persistPath != null)
+        {
+            _recreateCollectionMetadata = Helpers.Helper.LoadFromFile("DistributedCollections", replicationSetSettings.persistPath, new Dictionary<string, string>());
+
+            foreach (var collectionMetadata in _recreateCollectionMetadata)
+            {
+                var dictionaryTypeInfo = JsonSerializer.Deserialize<DictionaryTypeInfo>(collectionMetadata.Value);
+                if(dictionaryTypeInfo?.CollectionType == "DistributedDictionary")
+                    ValidateAndCreateDistributedDictionary(collectionMetadata.Key, dictionaryTypeInfo);
+            }
+
+        }
+
+        // TODO: Set status
+
         _replicationManager.Start();
+
+        // TODO: Set status
+
+        // AI: TODO: After the replicaset-level collection comparison is complete, ask every matching remote data collection for its key and value hash set, then request any missing or stale entries.
+
+        // TODO: Set status to ready as this node has read from file and synced from other nodes. The collections are now ready for use.
     }
 
     public void UpdateMasterKeys(string[]? masterKeys)
@@ -98,24 +128,18 @@ public class ReplicationSet : ICommandReceiver
 
             var collection = CreateDictionary<TKey, TValue>(name, handleConflict);
             _distributedCollections.Add(name, collection);
+            
+            var collectionMetadata = JsonSerializer.Serialize(new DictionaryTypeInfo("DistributedDictionary", typeof(TKey).AssemblyQualifiedName!, typeof(TValue).AssemblyQualifiedName!));
 
-            var typeInfo = new DictionaryTypeInfo("DistributedDictionary", typeof(TKey).AssemblyQualifiedName!, typeof(TValue).AssemblyQualifiedName!);
-            var jsonObject = JsonSerializer.Serialize(typeInfo);
-            _commandSender.SendCommand(new CommandDTO(name, jsonObject, ChangeType.CreateCollection, 0, 0));
+            // Update with metadata
+            _recreateCollectionMetadata.Add(name, collectionMetadata);
+            if (_replicationSetSettings.persistPath != null)
+                Helpers.Helper.SaveToFile("DistributedCollections", _replicationSetSettings.persistPath, _recreateCollectionMetadata);
+
+            _commandSender.SendCommand(new CommandDTO(name, collectionMetadata, ChangeType.CreateCollection, 0, 0));
 
             return (DistributedDictionary<TKey, TValue>)collection.DistributedCollection;
         }
-    }
-    private CollectionInfo CreateDictionary<TKey, TValue>(string name, HandleConflict<TKey, TValue> handleConflict) where TKey : notnull
-    {
-        var node = new DistributedDictionaryNode<TKey, TValue>(name, _commandSender, handleConflict);
-        var dictionary = new DistributedDictionary<TKey, TValue>(node);
-        return new CollectionInfo("DistributedDictionary", dictionary, node);
-    }
-
-    private CollectionInfo CreateRemoteDictionary<TKey, TValue>(string name) where TKey : notnull
-    {
-        return CreateDictionary<TKey, TValue>(name, (key, localValue, distributedValue) => localValue.Value);
     }
 
     // Current accepted key types for distributed dictionaries - If changed, test that remote nodes can still create collections with the same key type.
@@ -134,6 +158,50 @@ public class ReplicationSet : ICommandReceiver
             throw new NotSupportedException($"Key type '{keyType}' is not supported. Use a non-nullable primitive, enum, string, Guid, or simple date/time type.");
         }
     }
+
+    private void ValidateAndCreateDistributedDictionary(string collectionName, DictionaryTypeInfo dictionaryTypeInfo)
+    {
+        // Validate CollectionType is legal and supported
+        if (dictionaryTypeInfo.CollectionType != "DistributedDictionary")
+            throw new InvalidOperationException($"Unsupported collection type: {dictionaryTypeInfo.CollectionType}");
+
+        // Get and validate types
+        var keyType = Type.GetType(dictionaryTypeInfo.KeyType, throwOnError: true)!;
+        var valueType = Type.GetType(dictionaryTypeInfo.ValueType, throwOnError: true)!;
+        ValidateKeyType(keyType);
+
+        // Check if the collection already exists and has the same type
+        if (_distributedCollections.TryGetValue(collectionName, out var existing))
+        {
+            var dictionaryType = typeof(IDictionary<,>).MakeGenericType(keyType, valueType);
+
+            // Validate type of found collection
+            if (!dictionaryType.IsInstanceOfType(existing.DistributedCollection))
+                throw new InvalidOperationException($"Collection '{collectionName}' has a different type.");
+            
+            return;
+        }
+
+        // Create the collection from metadata
+        var factory = typeof(ReplicationSet).GetMethod(nameof(CreateRemoteDictionary), BindingFlags.Instance | BindingFlags.NonPublic)!.MakeGenericMethod(keyType, valueType);
+        var collection = (CollectionInfo)factory.Invoke(this, new object[] { collectionName })!;
+        _distributedCollections.Add(collectionName, collection);
+
+        _distributedCollections[collectionName].Node.LoadDataFromFile();
+    }
+
+    private CollectionInfo CreateDictionary<TKey, TValue>(string name, HandleConflict<TKey, TValue> handleConflict) where TKey : notnull
+    {
+        var node = new DistributedDictionaryNode<TKey, TValue>(name, _replicationSetSettings.persistPath, _commandSender, handleConflict);
+        var dictionary = new DistributedDictionary<TKey, TValue>(node);
+        return new CollectionInfo("DistributedDictionary", dictionary, node);
+    }
+
+    private CollectionInfo CreateRemoteDictionary<TKey, TValue>(string name) where TKey : notnull
+    {
+        return CreateDictionary<TKey, TValue>(name, (key, localValue, distributedValue) => localValue.Value);
+    }
+
     #endregion
 
     #region ICommandReceiver Implementation
@@ -146,25 +214,9 @@ public class ReplicationSet : ICommandReceiver
         {
             if (command.Action == ChangeType.CreateCollection)
             {
-                var info = JsonSerializer.Deserialize<DictionaryTypeInfo>(command.JsonObject) ?? throw new InvalidOperationException("Invalid collection type information.");
-                if (info.CollectionType != "DistributedDictionary")
-                    throw new InvalidOperationException($"Unsupported collection type: {info.CollectionType}");
-
-                var keyType = Type.GetType(info.KeyType, throwOnError: true)!;
-                var valueType = Type.GetType(info.ValueType, throwOnError: true)!;
-                ValidateKeyType(keyType);
-
-                if (_distributedCollections.TryGetValue(command.CollectionName, out var existing))
-                {
-                    var dictionaryType = typeof(IDictionary<,>).MakeGenericType(keyType, valueType);
-                    if (!dictionaryType.IsInstanceOfType(existing.DistributedCollection))
-                        throw new InvalidOperationException($"Collection '{command.CollectionName}' has a different type.");
-                    return;
-                }
-
-                var factory = typeof(ReplicationSet).GetMethod(nameof(CreateRemoteDictionary), BindingFlags.Instance | BindingFlags.NonPublic)!.MakeGenericMethod(keyType, valueType);
-                var collection = (CollectionInfo)factory.Invoke(this, new object[] { command.CollectionName })!;
-                _distributedCollections.Add(command.CollectionName, collection);
+                var dictionaryTypeInfo = JsonSerializer.Deserialize<DictionaryTypeInfo>(command.JsonObject);
+                if(dictionaryTypeInfo != null)
+                    ValidateAndCreateDistributedDictionary(command.CollectionName, dictionaryTypeInfo);
             }
             else if (_distributedCollections.TryGetValue(command.CollectionName, out var collection))
             {

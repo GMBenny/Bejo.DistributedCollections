@@ -1,5 +1,4 @@
 <Solution>
-  <Folder Name="/Solution Items/" />
   <Project Path="Bejo.DistributedCollections/Bejo.DistributedCollections.csproj" />
   <Project Path="Bejo.DistributedCollections_Console/Bejo.DistributedCollections_Console.csproj" />
   <Project Path="Bejo.DistributedCollections_Tests/Bejo.DistributedCollections_Tests.csproj" />
