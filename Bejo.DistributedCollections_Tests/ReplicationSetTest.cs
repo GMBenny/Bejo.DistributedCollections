@@ -1,4 +1,5 @@
 using Bejo.DistributedCollections;
+using FluentAssertions;
 
 namespace Bejo.DistributedCollections_Tests;
 
@@ -98,6 +99,46 @@ public class ReplicationSetTest
         await rs1.SendMessage("Hello from NodeA");
         await Task.Delay(100); // Give some time for the message to be received
         Assert.Equal("Hello from NodeA", messageReceived);
+    }
+
+    [Fact]
+    public void CycleReplicationSet_NoFileTobeginWith_DictionaryContent()
+    {
+        var persistPath = Directory.CreateTempSubdirectory("Bejo.DistributedCollections_").FullName;
+
+        try
+        {
+            // Create a replication set, add a dictionary entry, and persist it to a file
+            var firstReplicationSet = CreateReplicationSet("NodeA", 13020, persistPath);
+            var firstDictionary = firstReplicationSet.GetOrCreateDistributedDictionary<int, string>("myDictionary", (key, localValue, distributedValue) => localValue.Value);
+            firstDictionary.Add(1, "one");
+
+            // Assert file content
+            Assert.True(File.Exists(Path.Combine(persistPath, "DistributedCollections.json"))); // Does the file that is supposed to contain information about the dictionary we just created exist?
+            var dictionaryFile = Assert.Single(Directory.GetFiles(persistPath, "DistributedDictionary_*.json")); // Is there a file that could contain the dictionary itself, with a value inside it?
+            var distributedCollectionsContent = File.ReadAllText(Path.Combine(persistPath, "DistributedCollections.json"));
+            distributedCollectionsContent.Should().Contain("myDictionary"); // Name of collection
+            distributedCollectionsContent.Should().Contain("DistributedDictionary"); // Type of collection
+            
+            var dictionaryContent = File.ReadAllText(dictionaryFile);
+            Assert.Contains("\"Key\":1", dictionaryContent); // The key must exist
+            Assert.Contains("\"Value\":\"one\"", dictionaryContent); // The value must exist
+
+            // Now, create a new replication set that reads from the same persist path
+            var restartedReplicationSet = CreateReplicationSet("NodeB", 13021, persistPath);
+            var restoredDictionary = restartedReplicationSet.GetOrCreateDistributedDictionary<int, string>("myDictionary", (key, localValue, distributedValue) => localValue.Value);
+
+            Assert.Equal("one", restoredDictionary[1]);
+        }
+        finally
+        {
+            Directory.Delete(persistPath, recursive: true);
+        }
+    }
+
+    private static ReplicationSet CreateReplicationSet(string nodeName, int port, string persistPath)
+    {
+        return new ReplicationSet(new ReplicationSetSettings(nodeName,port,false,null,[],3,TimeSpan.FromSeconds(2),persistPath));
     }
 
     private async Task WaitForReplicationSetToStart(ReplicationSet[] rs)
