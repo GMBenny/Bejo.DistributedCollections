@@ -136,6 +136,102 @@ public class ReplicationSetTest
         }
     }
 
+    [Fact]
+    public async Task NewReplicationSetInCluster_FunctioningCluster_TwoNodeCluster() // Without nodeKey every node are accepted
+    {
+        // Start first replication set
+        var set1 = new ReplicationSet(new ReplicationSetSettings("NodeA", 13031, false, null, [], 3, new TimeSpan(0, 0, 2)));
+
+        // Await it starts
+        await WaitForReplicationSetToStart([set1]);
+
+        // Ensure no other nodes in cluster
+        set1.GetReplicationSetStatus().NetworkStats.Count().Should().Be(0);
+
+        // Start second replication set, which should join the cluster
+        var set2 = new ReplicationSet(new ReplicationSetSettings("NodeB", 13032, false, null, [new NodeSettings("localhost", 13031, TimeSpan.FromMinutes(1))], 3, new TimeSpan(0, 0, 2)));
+
+        // Await both are started
+        await WaitForReplicationSetToStart([set1, set2]);
+
+        // Both nods should now see each other in the cluster
+        set1.GetReplicationSetStatus().NetworkStats.Count().Should().Be(1);
+        set2.GetReplicationSetStatus().NetworkStats.Count().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task NewReplicationSetInCluster_WithCorrectCode_TwoNodeCluster()
+    {
+        // Start first replication set
+        var set1 = new ReplicationSet(new ReplicationSetSettings("NodeA", 13041, false, null, [], 3, new TimeSpan(0, 0, 2), null, "abc123!!"));
+
+        // Await it starts
+        await WaitForReplicationSetToStart([set1]);
+
+        // Ensure no other nodes in cluster
+        set1.GetReplicationSetStatus().NetworkStats.Count().Should().Be(0);
+
+        // Start second replication set, which should join the cluster
+        var set2 = new ReplicationSet(new ReplicationSetSettings("NodeB", 13042, false, null, [new NodeSettings("localhost", 13041, TimeSpan.FromMinutes(1))], 3, new TimeSpan(0, 0, 2), null, "abc123!!"));
+
+        // Await both are started
+        await WaitForReplicationSetToStart([set1, set2]);
+
+        // Both nods should now see each other in the cluster
+        set1.GetReplicationSetStatus().NetworkStats.Count().Should().Be(1);
+        set2.GetReplicationSetStatus().NetworkStats.Count().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task NewReplicationSetInCluster_WithIncorrectCode_OneNodeCluster()
+    {
+        // Start first replication set
+        var set1 = new ReplicationSet(new ReplicationSetSettings("NodeA", 13051, false, null, [], 3, new TimeSpan(0, 0, 2), null, "abc123!!"));
+
+        // Await it starts
+        await WaitForReplicationSetToStart([set1]);
+
+        // Ensure no other nodes in cluster
+        set1.GetReplicationSetStatus().NetworkStats.Count().Should().Be(0);
+
+        // Start second replication set, which should join the cluster
+        var set2 = new ReplicationSet(new ReplicationSetSettings("NodeB", 13052, false, null, [new NodeSettings("localhost", 13051, TimeSpan.FromMinutes(1))], 3, new TimeSpan(0, 0, 2), null, "wrongcode"));
+
+        // Await both are started
+        await WaitForReplicationSetToStart([set1, set2]);
+
+        // Both nods should now see each other in the cluster
+        set1.GetReplicationSetStatus().NetworkStats.Count().Should().Be(0);
+        set2.GetReplicationSetStatus().NetworkStats.Count().Should().Be(0);
+    }
+
+
+    [Fact]
+    public async Task NewReplicationSetInCluster_FunctioningCluster_WithDataSync()
+    {
+        // Start first replication set
+        var set1 = new ReplicationSet(new ReplicationSetSettings("NodeA", 13061, false, null, [], 3, new TimeSpan(0, 0, 2)));
+
+        // Await it starts
+        await WaitForReplicationSetToStart([set1]);
+
+        // Create a distributed dictionary and add an entry
+        var d1 = set1.GetOrCreateDistributedDictionary<int, string>("myDictionary", (key, localValue, distributedValue) => localValue.Value);
+        d1.TryAdd(1, "one");
+
+        // -- Ensure no other nodes in cluster --
+        set1.GetReplicationSetStatus().NetworkStats.Count().Should().Be(0);
+
+        // Start second replication set, which should join the cluster
+        var set2 = new ReplicationSet(new ReplicationSetSettings("NodeB", 13062, false, null, [new NodeSettings("localhost", 13061, TimeSpan.FromMinutes(1))], 3, new TimeSpan(0, 0, 2)));
+
+        // Await both are started : set2 outh to be cycleing through Offline, LoadingData, Syncing, Online and then it's ready
+        await WaitForReplicationSetToStart([set1, set2]);
+
+        var d2 = set2.GetOrCreateDistributedDictionary<int, string>("myDictionary", (key, localValue, distributedValue) => localValue.Value);
+        d2[1].Should().Be("one");
+    }
+
     private static ReplicationSet CreateReplicationSet(string nodeName, int port, string persistPath)
     {
         return new ReplicationSet(new ReplicationSetSettings(nodeName,port,false,null,[],3,TimeSpan.FromSeconds(2),persistPath));
