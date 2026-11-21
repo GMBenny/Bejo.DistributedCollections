@@ -4,9 +4,10 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Bejo.DistributedCollections.Dictionary;
 
-internal class DistributedDictionaryNode<TKey, TValue>(string name, ICommandSender commandSender, ReplicationSet.HandleConflict<TKey, TValue> handleConflict) : IDistributedCollectionNode where TKey : notnull
+internal class DistributedDictionaryNode<TKey, TValue>(string name, string? persistPath, ICommandSender commandSender, ReplicationSet.HandleConflict<TKey, TValue> handleConflict) : IDistributedCollectionNode where TKey : notnull
 {
-    private readonly ConcurrentDictionary<TKey, LocalStorage<TKey, TValue>> _dictionaryReplica = new();
+    private ConcurrentDictionary<TKey, LocalStorage<TKey, TValue>> _dictionaryReplica = new();
+    // AI: TODO: Load this dictionary replica from its persistent file during construction, before any remote synchronization, and persist it after every local or remote change.
     private ReplicationSet.HandleConflict<TKey, TValue> _handleConflict = handleConflict;
 
     internal ICollection<TKey> Keys => _dictionaryReplica.Keys;
@@ -31,6 +32,8 @@ internal class DistributedDictionaryNode<TKey, TValue>(string name, ICommandSend
         if (!_dictionaryReplica.TryAdd(key, localValue))
             return false;
 
+        PersistDataToFile();
+
         commandSender.SendCommand(new CommandDTO(name, localValue.JsonString, ChangeType.AddUpdated, 0, localValue.ValueHash));
         return true;
     }
@@ -46,6 +49,8 @@ internal class DistributedDictionaryNode<TKey, TValue>(string name, ICommandSend
 
             _dictionaryReplica[key] = localValue; // Update the value in the local dictionary
 
+            PersistDataToFile();
+
             return true;
         }
         else // If the key does not exist, we create it and send a replication command
@@ -53,6 +58,9 @@ internal class DistributedDictionaryNode<TKey, TValue>(string name, ICommandSend
             var createResult = _dictionaryReplica.TryAdd(key, localValue); // Attempt to add the new key-value pair
 
             // If local change was a success, then replicate the change.
+            if (createResult)
+                PersistDataToFile();
+
             if (createResult)
                 commandSender.SendCommand(new CommandDTO(name, localValue.JsonString, ChangeType.AddUpdated, 0, localValue.ValueHash));
             
@@ -77,6 +85,7 @@ internal class DistributedDictionaryNode<TKey, TValue>(string name, ICommandSend
         var removeResult = _dictionaryReplica.TryRemove(key, out var removedValue);
 
         // If local change was a success, then replicate the change.
+        // AI: TODO: Persist the dictionary after this local removal.
         if (removeResult && removedValue != null)
             commandSender.SendCommand(new CommandDTO(name, removedValue.JsonString, ChangeType.Removed, removedValue.ValueHash, 0));
 
@@ -87,6 +96,7 @@ internal class DistributedDictionaryNode<TKey, TValue>(string name, ICommandSend
     {
         _dictionaryReplica.Clear();
 
+        // AI: TODO: Persist the dictionary after this local clear operation.
         commandSender.SendCommand(new CommandDTO(name, string.Empty, ChangeType.ClearCollection, 0, 0));
     }
 
@@ -104,6 +114,7 @@ internal class DistributedDictionaryNode<TKey, TValue>(string name, ICommandSend
                     if (existingValue.ValueHash == command.FromValueHash)
                     {
                         _dictionaryReplica[l.Key] = l;
+                        // AI: TODO: Persist the dictionary after applying a remote update that matched the local hash.
 
                         // Fire event when data-change from remote source
                         Changed?.Invoke(this, new DictionaryChangedEventArgs<TKey>(l.Key, command.Action.ToString()));
@@ -113,6 +124,7 @@ internal class DistributedDictionaryNode<TKey, TValue>(string name, ICommandSend
                         // handle conflict using the provided delegate
                         var resolvedValue = _handleConflict(l.Key, new ConflictData<TValue>(existingValue.ValueHash, existingValue.LastChangedUTC, existingValue.Value), new ConflictData<TValue>(l.ValueHash, l.LastChangedUTC, l.Value));
                         _dictionaryReplica[l.Key] = new LocalStorage<TKey, TValue>(l.Key, resolvedValue);
+                        // AI: TODO: Persist the dictionary after resolving and applying a remote conflict.
 
                         // Fire event when data-change from remote source
                         Changed?.Invoke(this, new DictionaryChangedEventArgs<TKey>(l.Key, command.Action.ToString()));
@@ -121,6 +133,7 @@ internal class DistributedDictionaryNode<TKey, TValue>(string name, ICommandSend
                 else
                 {
                     _dictionaryReplica.TryAdd(l.Key, l);
+                    // AI: TODO: Persist the dictionary after applying a remote item that was missing locally.
 
                     // Fire event when data-change from remote source
                     Changed?.Invoke(this, new DictionaryChangedEventArgs<TKey>(l.Key, command.Action.ToString()));
@@ -130,14 +143,37 @@ internal class DistributedDictionaryNode<TKey, TValue>(string name, ICommandSend
             case ChangeType.Removed:
                 var removed = new LocalStorage<TKey, TValue>(command.JsonObject);
                 _dictionaryReplica.TryRemove(removed.Key, out _);
+                // AI: TODO: Persist the dictionary after applying a remote removal.
                 // TODO: Fyr event af, så brugeren ved dette objekt er blevet slettet via netwærket.
                 break;
             case ChangeType.ClearCollection:
                 _dictionaryReplica.Clear();
+                // AI: TODO: Persist the dictionary after applying a remote clear operation.
                 // TODO: Fyr event af, så brugeren ved hele collectionen er blevet ryddet via netwærket.
                 break;
             default:
                 throw new InvalidOperationException($"Unsupported command action: {command.Action}");
+        }
+    }
+
+    public void LoadDataFromFile()
+    {
+        // As it's a new collection, load it's data if any is found
+        if (persistPath != null)
+        {
+            var data = Helpers.Helper.LoadFromFile($"DistributedDictionary_{Helpers.Helper.Hash(name)}", persistPath, new ConcurrentDictionary<TKey, LocalStorage<TKey, TValue>>());
+
+            if(_dictionaryReplica.Count > 0)
+                throw new InvalidOperationException("The collection already exists and has data, but it should be a new collection.");
+
+            _dictionaryReplica = data;
+        }
+    }
+    public void PersistDataToFile()
+    {
+        if (persistPath != null)
+        {
+            Helpers.Helper.SaveToFile($"DistributedDictionary_{Helpers.Helper.Hash(name)}", persistPath, _dictionaryReplica);
         }
     }
 }

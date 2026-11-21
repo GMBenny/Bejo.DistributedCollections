@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace Bejo.DistributedCollections.Helpers;
 
@@ -42,6 +43,46 @@ internal static class Helper
         }
         return hash;
     }
+
+    // If anything fails, return the default value as this function call will be followed by a call to other nodes to get the latest data
+    internal static T LoadFromFile<T>(string fileType, string persistPath, T defaultValue)
+    {
+        try
+        {
+            string content = File.ReadAllText(Path.Combine(persistPath, $"{fileType}.json"));
+            var data = JsonSerializer.Deserialize<T>(content);
+
+            return data ?? defaultValue;
+        }
+        catch (Exception e)
+        {
+            return defaultValue;
+        }
+    }
+
+    // If anything fails, return the default value as this function call will be followed by a call to other nodes to get the latest data
+    internal static void SaveToFile<T>(string fileType, string persistPath, T distributedCollections)
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            try
+            {
+                string content = JsonSerializer.Serialize<T>(distributedCollections);
+                File.WriteAllText(Path.Combine(persistPath, $"{fileType}.json"), content);
+
+                return;
+            }
+            catch (Exception)
+            {
+                // Wait a bit before retrying
+                Thread.Sleep(100);
+
+                // TODO: Log the error to a log file or logging system for further investigation
+            }
+        }
+    }
+
+
 
     #region Byte[] functions
     internal static byte[] Encrypt(byte[] data, string masterKey)
