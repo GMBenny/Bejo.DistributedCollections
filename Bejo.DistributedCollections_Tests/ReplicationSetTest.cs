@@ -20,7 +20,8 @@ public class ReplicationSetTest
 
         var status = set.GetReplicationSetStatus();
 
-        Assert.Equal(ThisStatus.Started, status.ThisStatus);
+        Assert.Equal(ThisStatus.SyncingData, status.ThisStatus);
+        Assert.True(status.ServerStarted);
         Assert.Equal(NetworkStatus.Offline, Assert.Single(status.NetworkStats).LastStatus);
     }
 
@@ -205,7 +206,6 @@ public class ReplicationSetTest
         set2.GetReplicationSetStatus().NetworkStats.Count().Should().Be(0);
     }
 
-
     [Fact]
     public async Task NewReplicationSetInCluster_FunctioningCluster_WithDataSync()
     {
@@ -241,7 +241,7 @@ public class ReplicationSetTest
     {
         foreach (var r in rs)
         {
-            while (r.GetReplicationSetStatus().ThisStatus != ThisStatus.Started)
+            while (!r.GetReplicationSetStatus().ServerStarted)
             {
                 await Task.Delay(25);
             }

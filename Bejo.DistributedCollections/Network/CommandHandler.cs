@@ -1,13 +1,12 @@
 using Bejo.DistributedCollections.Contracts;
 using System.Collections.Concurrent;
-
 namespace Bejo.DistributedCollections.Network;
 
 // Sends commands to a specific node and monitors its status
 internal class CommandHandler
 {
     private readonly NodeSettings _nodeSettings;
-    internal NetworkStat NetworkStat { get; private set; } = new NetworkStat("", DateTime.MinValue, NetworkStatus.Offline, TimeSpan.Zero);
+    internal NetworkStat ForeignNodeStat { get; private set; } = new NetworkStat("", DateTime.MinValue, NetworkStatus.Offline, TimeSpan.Zero);
 
     // Command queue
     private readonly ConcurrentQueue<CommandDTO> _changes = new();
@@ -23,7 +22,7 @@ internal class CommandHandler
 
     private readonly Protocol _protocol;
 
-    internal CommandHandler(NodeSettings nodeSettings, int retryCount, TimeSpan timeout, bool compress, string? masterKey, CancellationToken cancellationToken)
+    internal CommandHandler(NodeSettings nodeSettings, int retryCount, TimeSpan timeout, bool compress, string? masterKey, string? nodeKey, CancellationToken cancellationToken)
     {
         _nodeSettings = nodeSettings;
         _protocol = new Protocol(_nodeSettings.Host, _nodeSettings.Port, retryCount, timeout, compress, masterKey);
@@ -33,6 +32,12 @@ internal class CommandHandler
 
         _processChangesTask = ProcessCommandAsync(_cancellationTokenSource.Token);
         _nodeStatTask = MonitorNodeStatusAsync(_nodeSettings.PingInterval, _cancellationTokenSource.Token);
+
+        ForeignNodeStat = new NetworkStat(
+            $"{_nodeSettings.Host}:{_nodeSettings.Port}",
+            DateTime.UtcNow,
+            nodeKey == null ? NetworkStatus.Offline : NetworkStatus.NoNodeKey,
+            TimeSpan.Zero);
     }
 
     // Recieves a command and adds it to the queue for processing
@@ -85,7 +90,7 @@ internal class CommandHandler
         {
             await Task.Delay(pingInterval, token); // Check every pingInterval
 
-            NetworkStat = await _protocol.SendPingAsync();
+            ForeignNodeStat = await _protocol.SendPingAsync();
         }
     }
 

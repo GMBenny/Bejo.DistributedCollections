@@ -564,7 +564,7 @@ public class DistributedDictionaryTest
     {
         foreach (var r in rs)
         {
-            while (r.GetReplicationSetStatus().ThisStatus != DistributedCollections.ThisStatus.Started)
+            while (!r.GetReplicationSetStatus().ServerStarted)
             {
                 await Task.Delay(25);
             }

@@ -13,7 +13,15 @@ internal class ReplicationManager : ICommandSender
 
     internal NetworkStat[] GetNetworkStats()
     {
-        return _commandhandlers.Select(q => q.NetworkStat).ToArray();
+        return _commandhandlers.Select(q => q.ForeignNodeStat).ToArray();
+    }
+
+    internal NetworkStat[] GetOnlineNetworkStats()
+    {
+        return _commandhandlers
+            .Select(q => q.ForeignNodeStat)
+            .Where(stat => stat.LastStatus == NetworkStatus.Online)
+            .ToArray();
     }
 
 
@@ -25,7 +33,7 @@ internal class ReplicationManager : ICommandSender
         // Start client through CommandHandlers and Protocol
         foreach (var nodeSettings in replicationSetSettings.nodes)
         {
-            _commandhandlers.Add(new CommandHandler(nodeSettings, replicationSetSettings.retryCount, replicationSetSettings.timeout, replicationSetSettings.compressData, replicationSetSettings.masterKeys?.FirstOrDefault(), CancellationToken.None));
+            _commandhandlers.Add(new CommandHandler(nodeSettings, replicationSetSettings.retryCount, replicationSetSettings.timeout, replicationSetSettings.compressData, replicationSetSettings.masterKeys?.FirstOrDefault(), replicationSetSettings.nodeKey, CancellationToken.None));
         }
     }
 

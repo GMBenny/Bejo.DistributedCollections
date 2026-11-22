@@ -11,11 +11,14 @@ namespace Bejo.DistributedCollections;
 public class ReplicationSet : ICommandReceiver
 {
     // Local storage for all distributed collections, keyed by collection name
+    // TODO: Disse to er begge CollectionName som key, men forskellig indhold. De bør slåes sammen
     private readonly Dictionary<string, CollectionInfo> _distributedCollections = new();
     private readonly Dictionary<string, string> _recreateCollectionMetadata = new();
 
     // ReplicationSet settings
     private ReplicationSetSettings _replicationSetSettings;
+    private readonly object _statusLock = new();
+    private ThisStatus _thisStatus = ThisStatus.Starting;
 
     // Manages server and client communication for replication
     private readonly ReplicationManager _replicationManager;
@@ -39,9 +42,11 @@ public class ReplicationSet : ICommandReceiver
         _commandSender = _replicationManager;
         _messageHandler = messageHandler;
 
-        // TODO: Set status
+        // Start listening before loading local data. Server readiness and node readiness
+        // are separate states.
+        _replicationManager.Start();
 
-        // Ikke helt godt nok til at skabe en brugbar collection, da vi ikke har synkroniseret med andre noder endnu. Vi skal vente på at alle noder er startet og har synkroniseret deres collections.
+        SetLocalStatus(ThisStatus.LoadingData);
         if (replicationSetSettings.persistPath != null)
         {
             _recreateCollectionMetadata = Helpers.Helper.LoadFromFile("DistributedCollections", replicationSetSettings.persistPath, new Dictionary<string, string>());
@@ -55,15 +60,12 @@ public class ReplicationSet : ICommandReceiver
 
         }
 
-        // TODO: Set status
+        SetLocalStatus(ThisStatus.SyncingData);
 
-        _replicationManager.Start();
-
-        // TODO: Set status
-
-        // AI: TODO: After the replicaset-level collection comparison is complete, ask every matching remote data collection for its key and value hash set, then request any missing or stale entries.
-
-        // TODO: Set status to ready as this node has read from file and synced from other nodes. The collections are now ready for use.
+        // There is nothing to synchronize for a standalone node. Nodes with
+        // configured peers remain in SyncingData until the sync phase is implemented.
+        if (replicationSetSettings.nodes.Length == 0)
+            SetLocalStatus(ThisStatus.Online);
     }
 
     public void UpdateMasterKeys(string[]? masterKeys)
@@ -84,14 +86,28 @@ public class ReplicationSet : ICommandReceiver
     #region Network stuff
     public ReplicationSetStatus GetReplicationSetStatus()
     {
-        var thisStatus = _replicationManager?.ServerState switch
+        if (_replicationManager?.ServerState == Server.ServerState.Faulted)
+            SetLocalStatus(ThisStatus.Faulted);
+
+        ThisStatus localStatus;
+        lock (_statusLock)
         {
-            Server.ServerState.Starting => ThisStatus.Starting,
-            Server.ServerState.Started => ThisStatus.Started,
-            Server.ServerState.Faulted => ThisStatus.Faulted,
-            _ => ThisStatus.Stopped
-        };
-        return new ReplicationSetStatus(_replicationSetSettings.nodeName, thisStatus, _replicationManager?.GetNetworkStats() ?? Array.Empty<NetworkStat>());
+            localStatus = _thisStatus;
+        }
+
+        return new ReplicationSetStatus(
+            _replicationSetSettings.nodeName,
+            localStatus,
+            _replicationManager?.GetNetworkStats() ?? Array.Empty<NetworkStat>(),
+            _replicationManager?.ServerState == Server.ServerState.Started);
+    }
+
+    internal void SetLocalStatus(ThisStatus status)
+    {
+        lock (_statusLock)
+        {
+            _thisStatus = status;
+        }
     }
 
     // Send a message to all nodes in the replication set
