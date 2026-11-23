@@ -6,6 +6,7 @@ namespace Bejo.DistributedCollections.Network;
 internal class CommandHandler
 {
     private readonly NodeSettings _nodeSettings;
+    internal string Address => $"{_nodeSettings.Host}:{_nodeSettings.Port}";
     internal NetworkStat ForeignNodeStat { get; private set; } = new NetworkStat("", DateTime.MinValue, NetworkStatus.Offline, TimeSpan.Zero);
 
     // Command queue
@@ -22,13 +23,24 @@ internal class CommandHandler
     private CancellationTokenSource? _cancellationTokenSource;
 
     private readonly Protocol _protocol;
+    private readonly Action<string, string, int, NetworkStatus>? _peerConnected;
     private readonly SemaphoreSlim _authenticationLock = new(1, 1);
     private volatile bool _authenticated;
+    private volatile bool _authenticationRejected;
+    private volatile bool _hasSuccessfulContact;
+    private string? _remoteNodeName;
+    private DateTime _lastSuccessfulContactUtc;
 
-    internal CommandHandler(NodeSettings nodeSettings, int retryCount, TimeSpan timeout, bool compress, string? masterKey, string nodeName, string? nodeKey, CancellationToken cancellationToken)
+    private static readonly TimeSpan OfflineAfter = TimeSpan.FromSeconds(30);
+
+    internal bool AuthenticationRejected => _authenticationRejected;
+    internal string? RemoteNodeName => _remoteNodeName;
+
+    internal CommandHandler(NodeSettings nodeSettings, int retryCount, TimeSpan timeout, bool compress, string? masterKey, string nodeName, string? nodeKey, int listenerPort, Action<string, string, int, NetworkStatus>? peerConnected, CancellationToken cancellationToken)
     {
         _nodeSettings = nodeSettings;
-        _protocol = new Protocol(_nodeSettings.Host, _nodeSettings.Port, retryCount, timeout, compress, masterKey, nodeName, nodeKey);
+        _peerConnected = peerConnected;
+        _protocol = new Protocol(_nodeSettings.Host, _nodeSettings.Port, retryCount, timeout, compress, masterKey, nodeName, nodeKey, listenerPort);
 
         _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -37,6 +49,7 @@ internal class CommandHandler
             DateTime.UtcNow,
             nodeKey == null ? NetworkStatus.Offline : NetworkStatus.NoNodeKey,
             TimeSpan.Zero);
+        _lastSuccessfulContactUtc = DateTime.UtcNow;
 
         _initialHandshakeTask = EstablishInitialConnectionAsync(_cancellationTokenSource.Token);
         _signal.Release();
@@ -62,6 +75,9 @@ internal class CommandHandler
         while (!cancellationToken.IsCancellationRequested)
         {
             // If not authenticated, try to authenticate first before processing commands
+            if (_authenticationRejected)
+                return;
+
             if (!_authenticated)
             {
                 await TryAuthenticateAsync(cancellationToken);
@@ -114,6 +130,9 @@ internal class CommandHandler
 
         while (!token.IsCancellationRequested)
         {
+            if (_authenticationRejected)
+                return;
+
             await Task.Delay(pingInterval, token); // Check every pingInterval
 
             if (!_authenticated)
@@ -122,7 +141,30 @@ internal class CommandHandler
             }
             else
             {
-                ForeignNodeStat = await _protocol.SendPingAsync();
+                var ping = await _protocol.SendPingAsync();
+                if (ping.LastStatus == NetworkStatus.Offline ||
+                    ping.LastStatus == NetworkStatus.UnexpectedResult)
+                {
+                    _authenticated = false;
+                    var now = DateTime.UtcNow;
+                    var status = now - _lastSuccessfulContactUtc >= OfflineAfter
+                        ? NetworkStatus.Offline
+                        : NetworkStatus.Suspect;
+
+                    ForeignNodeStat = ForeignNodeStat with
+                    {
+                        NodeName = _remoteNodeName,
+                        LastRoundtripUTC = now,
+                        LastStatus = status,
+                        RoundtripTime = ping.RoundtripTime
+                    };
+                }
+                else
+                {
+                    _hasSuccessfulContact = true;
+                    _lastSuccessfulContactUtc = ping.LastRoundtripUTC;
+                    ForeignNodeStat = ping with { NodeName = _remoteNodeName };
+                }
             }
         }
     }
@@ -132,7 +174,7 @@ internal class CommandHandler
         while (!cancellationToken.IsCancellationRequested)
         {
             await TryAuthenticateAsync(cancellationToken);
-            if (_authenticated)
+            if (_authenticated || _authenticationRejected)
                 return;
 
             await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
@@ -147,13 +189,18 @@ internal class CommandHandler
             if (!_authenticated)
             {
                 // HELLO is the only way to mark the remote node as authenticated.
-                var remoteStatus = await _protocol.SendHelloAsync();
+                var remote = await _protocol.SendHelloAsync();
                 _authenticated = true;
+                _remoteNodeName = remote.NodeName;
                 ForeignNodeStat = ForeignNodeStat with
                 {
-                    LastStatus = remoteStatus,
+                    NodeName = remote.NodeName,
+                    LastStatus = remote.Status,
                     LastRoundtripUTC = DateTime.UtcNow
                 };
+                _hasSuccessfulContact = true;
+                _lastSuccessfulContactUtc = DateTime.UtcNow;
+                _peerConnected?.Invoke(remote.NodeName, _nodeSettings.Host, remote.ListenerPort, remote.Status);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -163,9 +210,12 @@ internal class CommandHandler
         catch (Exception ex)
         {
             _authenticated = false;
+            _authenticationRejected = ex.Message.Contains("Node key rejected", StringComparison.Ordinal);
             ForeignNodeStat = ForeignNodeStat with
             {
-                LastStatus = ex.Message.Contains("Node key rejected", StringComparison.Ordinal) ? NetworkStatus.NoNodeKey : NetworkStatus.Offline,
+                LastStatus = _authenticationRejected
+                    ? NetworkStatus.NoNodeKey
+                    : GetConnectionFailureStatus(),
                 LastRoundtripUTC = DateTime.UtcNow
             };
         }
@@ -175,11 +225,26 @@ internal class CommandHandler
         }
     }
 
+    private NetworkStatus GetConnectionFailureStatus()
+    {
+        if (!_hasSuccessfulContact)
+            return NetworkStatus.Offline;
+
+        return DateTime.UtcNow - _lastSuccessfulContactUtc >= OfflineAfter
+            ? NetworkStatus.Offline
+            : NetworkStatus.Suspect;
+    }
+
     internal async Task SendMessage(string message)
     {
         await _initialHandshakeTask;
         if (!_authenticated)
+        {
+            if (_authenticationRejected)
+                throw new InvalidOperationException($"Node {_nodeSettings.Host}:{_nodeSettings.Port} rejected this node key.");
+
             await TryAuthenticateAsync(CancellationToken.None);
+        }
 
         if (!_authenticated)
             throw new InvalidOperationException($"Node {_nodeSettings.Host}:{_nodeSettings.Port} is not authenticated.");
@@ -204,7 +269,12 @@ internal class CommandHandler
     {
         await _initialHandshakeTask;
         if (!_authenticated)
+        {
+            if (_authenticationRejected)
+                throw new InvalidOperationException($"Node {_nodeSettings.Host}:{_nodeSettings.Port} rejected this node key.");
+
             await TryAuthenticateAsync(CancellationToken.None);
+        }
 
         if (!_authenticated)
             throw new InvalidOperationException($"Node {_nodeSettings.Host}:{_nodeSettings.Port} is not authenticated.");
@@ -223,5 +293,28 @@ internal class CommandHandler
             };
             throw;
         }
+    }
+
+    internal async Task SendMembershipAsync(MembershipUpdate update)
+    {
+        await _initialHandshakeTask;
+        if (!_authenticated)
+        {
+            if (_authenticationRejected)
+                throw new InvalidOperationException($"Node {_nodeSettings.Host}:{_nodeSettings.Port} rejected this node key.");
+
+            await TryAuthenticateAsync(CancellationToken.None);
+        }
+
+        if (!_authenticated)
+            throw new InvalidOperationException($"Node {_nodeSettings.Host}:{_nodeSettings.Port} is not authenticated.");
+
+        await _protocol.SendMembershipAsync(update);
+    }
+
+    internal void Stop()
+    {
+        _cancellationTokenSource?.Cancel();
+        _protocol.Dispose();
     }
 }

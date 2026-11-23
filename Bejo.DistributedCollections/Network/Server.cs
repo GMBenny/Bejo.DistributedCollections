@@ -10,6 +10,11 @@ internal class Server
     private volatile ServerState _state = ServerState.Stopped;
     internal ServerState State => _state;
 
+    internal void Stop()
+    {
+        _listener?.Stop();
+    }
+
     private readonly int _port;
     private TcpListener? _listener;
     private readonly bool _compress;
@@ -191,16 +196,16 @@ internal class Server
             catch (IOException ex)
             {
                 // The client has, for example, disconnected.
-                Console.WriteLine($"Client communication error: {ex.Message}");
+                //Console.WriteLine($"Client communication error: {ex.Message}");
             }
             catch (Exception ex)
             {
                 // An unexpected error occurred while handling this client.
-                Console.WriteLine($"Client handler error: {ex}");
+                //Console.WriteLine($"Client handler error: {ex}");
             }
         }
 
-        Console.WriteLine($"Client disconnected: {remoteEndPoint}");
+        //Console.WriteLine($"Client disconnected: {remoteEndPoint}");
     }
 }
 

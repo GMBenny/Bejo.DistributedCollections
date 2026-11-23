@@ -7,5 +7,7 @@ public enum ThisStatus
     SyncingData,
     Online,
     Faulted,
+    Rejected,
+    Leaving,
     Stopped
 }

@@ -8,12 +8,12 @@ namespace Bejo.DistributedCollections;
 
 
 // Manages a set of distributed collections and handles replication commands
-public class ReplicationSet : ICommandReceiver, ISyncReceiver
+public class ReplicationSet : ICommandReceiver, ISyncReceiver, IMembershipReceiver
 {
     // Local storage for all distributed collections, keyed by collection name
     // TODO: Disse to er begge CollectionName som key, men forskellig indhold. De bør slåes sammen
     private readonly Dictionary<string, CollectionInfo> _distributedCollections = new();
-    private readonly Dictionary<string, string> _recreateCollectionMetadata = new();
+    //private readonly Dictionary<string, string> _recreateCollectionMetadata = new();
 
     // ReplicationSet settings
     private ReplicationSetSettings _replicationSetSettings;
@@ -53,13 +53,13 @@ public class ReplicationSet : ICommandReceiver, ISyncReceiver
         // Load existing collection metadata from the persist path if specified, and recreate collections from file
         if (replicationSetSettings.persistPath != null)
         {
-            _recreateCollectionMetadata = Helpers.Helper.LoadFromFile("DistributedCollections", replicationSetSettings.persistPath, new Dictionary<string, string>());
+            var persistedMetadata = Helpers.Helper.LoadFromFile("DistributedCollections", replicationSetSettings.persistPath, new Dictionary<string, string>());
 
-            foreach (var collectionMetadata in _recreateCollectionMetadata)
+            foreach (var collectionMetadata in persistedMetadata)
             {
                 var dictionaryTypeInfo = JsonSerializer.Deserialize<DictionaryTypeInfo>(collectionMetadata.Value);
                 if(dictionaryTypeInfo?.CollectionType == "DistributedDictionary")
-                    ValidateAndCreateDistributedDictionary(collectionMetadata.Key, dictionaryTypeInfo);
+                    ValidateAndCreateDistributedDictionary(collectionMetadata.Key, dictionaryTypeInfo, collectionMetadata.Value);
             }
 
         }
@@ -82,7 +82,7 @@ public class ReplicationSet : ICommandReceiver, ISyncReceiver
         catch (Exception ex)
         {
             _messageHandler?.Invoke($"Initial synchronization failed: {ex.Message}");
-            SetLocalStatus(ThisStatus.Faulted);
+            SetLocalStatus(_replicationManager.HasRejectedNode ? ThisStatus.Rejected : ThisStatus.Faulted);
         }
     }
 
@@ -163,12 +163,12 @@ public class ReplicationSet : ICommandReceiver, ISyncReceiver
                 ?? throw new InvalidOperationException($"Invalid metadata for collection '{metadata.Name}'.");
 
             // Validate and create the distributed dictionary
-            ValidateAndCreateDistributedDictionary(metadata.Name, dictionaryTypeInfo);
-            _recreateCollectionMetadata[metadata.Name] = metadata.Metadata;
+            ValidateAndCreateDistributedDictionary(metadata.Name, dictionaryTypeInfo, metadata.Metadata);
+            _distributedCollections[metadata.Name] = _distributedCollections[metadata.Name] with { RecreateCollectionMetadata = metadata.Metadata };
             
             // Persist the collection metadata if a persist path is specified
             if (_replicationSetSettings.persistPath != null)
-                Helpers.Helper.SaveToFile("DistributedCollections", _replicationSetSettings.persistPath, _recreateCollectionMetadata);
+                SaveCollectionMetadata();
         }
     }
 
@@ -190,6 +190,24 @@ public class ReplicationSet : ICommandReceiver, ISyncReceiver
     public async Task SendMessage(string message)
     {
         await _replicationManager.SendMessage(message);
+    }
+
+    public async Task LeaveAsync()
+    {
+        SetLocalStatus(ThisStatus.Leaving);
+        try
+        {
+            await _replicationManager.LeaveAsync();
+        }
+        finally
+        {
+            SetLocalStatus(ThisStatus.Stopped);
+        }
+    }
+
+    void IMembershipReceiver.HandleMembership(MembershipUpdate update)
+    {
+        _replicationManager.HandleMembership(update);
     }
     #endregion
 
@@ -218,15 +236,15 @@ public class ReplicationSet : ICommandReceiver, ISyncReceiver
                 throw new InvalidOperationException($"The collection with name '{name}' is not a distributed dictionary");
             }
 
-            var collection = CreateDictionary<TKey, TValue>(name, handleConflict);
-            _distributedCollections.Add(name, collection);
-            
             var collectionMetadata = JsonSerializer.Serialize(new DictionaryTypeInfo("DistributedDictionary", typeof(TKey).AssemblyQualifiedName!, typeof(TValue).AssemblyQualifiedName!));
 
+            var collection = CreateDictionary<TKey, TValue>(name, handleConflict, collectionMetadata);
+            _distributedCollections.Add(name, collection);
+            
             // Update with metadata
-            _recreateCollectionMetadata.Add(name, collectionMetadata);
+            _distributedCollections[name] = _distributedCollections[name] with { RecreateCollectionMetadata = collectionMetadata };
             if (_replicationSetSettings.persistPath != null)
-                Helpers.Helper.SaveToFile("DistributedCollections", _replicationSetSettings.persistPath, _recreateCollectionMetadata);
+                SaveCollectionMetadata();
 
             _commandSender.SendCommand(new CommandDTO(name, collectionMetadata, ChangeType.CreateCollection, 0, 0));
 
@@ -251,7 +269,7 @@ public class ReplicationSet : ICommandReceiver, ISyncReceiver
         }
     }
 
-    private void ValidateAndCreateDistributedDictionary(string collectionName, DictionaryTypeInfo dictionaryTypeInfo)
+    private void ValidateAndCreateDistributedDictionary(string collectionName, DictionaryTypeInfo dictionaryTypeInfo, string recreateCollectionMetadata)
     {
         // Validate CollectionType is legal and supported
         if (dictionaryTypeInfo.CollectionType != "DistributedDictionary")
@@ -276,22 +294,31 @@ public class ReplicationSet : ICommandReceiver, ISyncReceiver
 
         // Create the collection from metadata
         var factory = typeof(ReplicationSet).GetMethod(nameof(CreateRemoteDictionary), BindingFlags.Instance | BindingFlags.NonPublic)!.MakeGenericMethod(keyType, valueType);
-        var collection = (CollectionInfo)factory.Invoke(this, new object[] { collectionName })!;
+        var collection = (CollectionInfo)factory.Invoke(this, new object[] { collectionName, recreateCollectionMetadata })!;
         _distributedCollections.Add(collectionName, collection);
 
         _distributedCollections[collectionName].Node.LoadDataFromFile();
     }
 
-    private CollectionInfo CreateDictionary<TKey, TValue>(string name, HandleConflict<TKey, TValue> handleConflict) where TKey : notnull
+    private CollectionInfo CreateDictionary<TKey, TValue>(string name, HandleConflict<TKey, TValue> handleConflict, string recreateCollectionMetadata) where TKey : notnull
     {
         var node = new DistributedDictionaryNode<TKey, TValue>(name, _replicationSetSettings.persistPath, _commandSender, handleConflict);
         var dictionary = new DistributedDictionary<TKey, TValue>(node);
-        return new CollectionInfo("DistributedDictionary", dictionary, node);
+        return new CollectionInfo("DistributedDictionary", dictionary, node, recreateCollectionMetadata);
     }
 
-    private CollectionInfo CreateRemoteDictionary<TKey, TValue>(string name) where TKey : notnull
+    private CollectionInfo CreateRemoteDictionary<TKey, TValue>(string name, string recreateCollectionMetadata) where TKey : notnull
     {
-        return CreateDictionary<TKey, TValue>(name, (key, localValue, distributedValue) => localValue.Value);
+        return CreateDictionary<TKey, TValue>(name, (key, localValue, distributedValue) => localValue.Value, recreateCollectionMetadata);
+    }
+
+    private void SaveCollectionMetadata()
+    {
+        var metadata = _distributedCollections.ToDictionary(
+            collection => collection.Key,
+            collection => collection.Value.RecreateCollectionMetadata);
+
+        Helpers.Helper.SaveToFile("DistributedCollections", _replicationSetSettings.persistPath!, metadata);
     }
 
     #endregion
@@ -308,7 +335,7 @@ public class ReplicationSet : ICommandReceiver, ISyncReceiver
             {
                 var dictionaryTypeInfo = JsonSerializer.Deserialize<DictionaryTypeInfo>(command.JsonObject);
                 if(dictionaryTypeInfo != null)
-                    ValidateAndCreateDistributedDictionary(command.CollectionName, dictionaryTypeInfo);
+                    ValidateAndCreateDistributedDictionary(command.CollectionName, dictionaryTypeInfo, command.JsonObject);
             }
             else if (_distributedCollections.TryGetValue(command.CollectionName, out var collection))
             {
@@ -328,18 +355,18 @@ public class ReplicationSet : ICommandReceiver, ISyncReceiver
 
     SyncResponse ISyncReceiver.HandleSyncRequest(SyncRequest request)
     {
-        if (GetLocalStatus() != ThisStatus.Online)
+        if (GetLocalStatus() != ThisStatus.Online && GetLocalStatus() != ThisStatus.SyncingData)
             throw new InvalidOperationException("This node is not ready to provide synchronization data.");
 
         return request.Action switch
         {
             "COLLECTIONS" => new SyncResponse(
                 "COLLECTIONS",
-                JsonSerializer.Serialize(_recreateCollectionMetadata.Select(metadata =>
+                JsonSerializer.Serialize(_distributedCollections.Select(kv =>
                 {
-                    var typeInfo = JsonSerializer.Deserialize<DictionaryTypeInfo>(metadata.Value)
-                        ?? throw new InvalidOperationException($"Invalid metadata for collection '{metadata.Key}'.");
-                    return new SyncCollectionMetadata(metadata.Key, typeInfo.CollectionType, metadata.Value);
+                    var typeInfo = JsonSerializer.Deserialize<DictionaryTypeInfo>(kv.Value.RecreateCollectionMetadata)
+                        ?? throw new InvalidOperationException($"Invalid metadata for collection '{kv.Key}'.");
+                    return new SyncCollectionMetadata(kv.Key, typeInfo.CollectionType, kv.Value.RecreateCollectionMetadata);
                 }).ToArray())),
 
             "HASHES" => CreateSyncChangesResponse(request),

@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="Bejo.DistributedCollections/Bejo.DistributedCollections.csproj" />
   <Project Path="Bejo.DistributedCollections_Console/Bejo.DistributedCollections_Console.csproj" />
+  <Project Path="Bejo.DistributedCollections_Console2/Bejo.DistributedCollections_Console2.csproj" Id="e709ee13-1a0f-4c65-a899-9b699a5add7e" />
   <Project Path="Bejo.DistributedCollections_Tests/Bejo.DistributedCollections_Tests.csproj" />
 </Solution>

@@ -14,26 +14,30 @@ internal class Protocol
     private readonly string? _nodeKey;
     private readonly string? _acceptedNodeKey;
     private readonly Func<ThisStatus>? _statusProvider;
-    private readonly Action<string, string, NetworkStatus>? _peerConnected;
+    private readonly Action<string, string, int, NetworkStatus>? _peerConnected;
+    private readonly Action<string, NetworkStatus>? _peerStatusChanged;
+    private readonly int _listenerPort;
     private string Address = "";
 
     // Constructor for Clients
-    internal Protocol(string host, int port, int retryCount, TimeSpan timeout, bool compress, string? masterKey, string? nodeName = null, string? nodeKey = null)
+    internal Protocol(string host, int port, int retryCount, TimeSpan timeout, bool compress, string? masterKey, string? nodeName = null, string? nodeKey = null, int listenerPort = 0)
     {
         _client = new Client(host, port, retryCount, timeout, compress, masterKey);
         Address = $"{host}:{port}";
         _nodeName = nodeName;
         _nodeKey = nodeKey;
+        _listenerPort = listenerPort;
     }
 
     // Constructor for Servers
-    internal Protocol(ICommandReceiver receiver, string? nodeName = null, string? nodeKey = null, Func<ThisStatus>? statusProvider = null, Action<string, string, NetworkStatus>? peerConnected = null)
+    internal Protocol(ICommandReceiver receiver, string? nodeName = null, string? nodeKey = null, Func<ThisStatus>? statusProvider = null, Action<string, string, int, NetworkStatus>? peerConnected = null, Action<string, NetworkStatus>? peerStatusChanged = null)
     {
         _receiver = receiver;
         _nodeName = nodeName;
         _acceptedNodeKey = nodeKey;
         _statusProvider = statusProvider;
         _peerConnected = peerConnected;
+        _peerStatusChanged = peerStatusChanged;
     }
 
     #region Server-side methods for handling incoming messages
@@ -76,8 +80,8 @@ internal class Protocol
                         return Result("Error: Node key rejected.", authenticated: false, closeConnection: true);
 
                     var status = _statusProvider?.Invoke() ?? ThisStatus.Online;
-                    _peerConnected?.Invoke(hello.NodeName, remoteAddress ?? hello.NodeName, ToNetworkStatus(status));
-                    return Result($"OK:{_nodeName ?? string.Empty}:{status}", authenticated: true, closeConnection: false);
+                    _peerConnected?.Invoke(hello.NodeName, remoteAddress ?? hello.NodeName, hello.ListenerPort, ToNetworkStatus(status));
+                    return Result($"OK:{_nodeName ?? string.Empty}:{_listenerPort}:{status}", authenticated: true, closeConnection: false);
                 }
                 catch (Exception ex)
                 {
@@ -108,9 +112,29 @@ internal class Protocol
                     return Result($"Error: {ex.Message}", authenticated, false);
                 }
             }
+            else if (type.StartsWith("MEMBERSHIP:"))
+            {
+                try
+                {
+                    if (_receiver is not IMembershipReceiver membershipReceiver)
+                        throw new InvalidOperationException("Membership is not supported by this receiver.");
+
+                    var content = VerifyAndExtractMessage("SYSTEM:MEMBERSHIP:", message);
+                    var update = JsonSerializer.Deserialize<MembershipUpdate>(content.Message)
+                        ?? throw new InvalidOperationException("Invalid membership update.");
+                    membershipReceiver.HandleMembership(update);
+                    return Result("OK", authenticated, false);
+                }
+                catch (Exception ex)
+                {
+                    return Result($"Error: {ex.Message}", authenticated, false);
+                }
+            }
             else if (type.StartsWith("PING")) // A simple ping - returns utc-ticks
             {
                 var status = _statusProvider?.Invoke().ToString() ?? ThisStatus.Online.ToString();
+                if (remoteAddress != null && Enum.TryParse<ThisStatus>(status, out var remoteStatus))
+                    _peerStatusChanged?.Invoke(remoteAddress, ToNetworkStatus(remoteStatus));
                 return Result($"{DateTime.UtcNow.Ticks}:{status}", authenticated, false);
             }
             else if (type.StartsWith("STATUS"))
@@ -219,7 +243,7 @@ internal class Protocol
         }
     }
 
-    internal async Task<NetworkStatus> SendHelloAsync()
+    internal async Task<HelloResult> SendHelloAsync()
     {
         IsClientCheck();
 
@@ -227,7 +251,7 @@ internal class Protocol
             throw new InvalidOperationException("A node name is required for a handshake.");
 
         // Prepare the hello message with the node name and optional node key
-        var hello = new HelloMessage(_nodeName, _nodeKey);
+        var hello = new HelloMessage(_nodeName, _nodeKey, _listenerPort);
         
         // Serialize the hello message to JSON and compute its hash for integrity verification
         var message = JsonSerializer.SerializeToUtf8Bytes(hello);
@@ -250,12 +274,13 @@ internal class Protocol
 
         // Extract the status from the response and convert it to a NetworkStatus enum
         var responseParts = responseText.Split(':');
-        if (responseParts.Length < 3 ||
-            !Enum.TryParse<ThisStatus>(responseParts[2], out var remoteStatus))
+        if (responseParts.Length < 4 ||
+            !int.TryParse(responseParts[2], out var listenerPort) ||
+            !Enum.TryParse<ThisStatus>(responseParts[3], out var remoteStatus))
             throw new InvalidOperationException("Invalid handshake response.");
 
         // Return the corresponding NetworkStatus based on the remote status
-        return ToNetworkStatus(remoteStatus);
+        return new HelloResult(responseParts[1], listenerPort, ToNetworkStatus(remoteStatus));
     }
 
     internal async Task<SyncResponse> SendSyncRequestAsync(SyncRequest request)
@@ -274,6 +299,25 @@ internal class Protocol
         return JsonSerializer.Deserialize<SyncResponse>(responseText) ?? throw new InvalidOperationException("Invalid sync response.");
     }
 
+    internal async Task SendMembershipAsync(MembershipUpdate update)
+    {
+        IsClientCheck();
+
+        var payload = JsonSerializer.SerializeToUtf8Bytes(update);
+        var payloadHash = Helpers.Helper.Hash(payload);
+        var message = Encoding.UTF8.GetBytes($"SYSTEM:MEMBERSHIP:{payloadHash}:{Encoding.UTF8.GetString(payload)}");
+        var response = await _client.SendAsync(message);
+        var responseText = Encoding.UTF8.GetString(response);
+
+        if (responseText.StartsWith("Error:", StringComparison.Ordinal))
+            throw new InvalidOperationException(responseText);
+    }
+
+    internal void Dispose()
+    {
+        _client?.Dispose();
+    }
+
     private static NetworkStatus ToNetworkStatus(ThisStatus status)
     {
         return status switch
@@ -282,6 +326,8 @@ internal class Protocol
             ThisStatus.SyncingData => NetworkStatus.SyncingData,
             ThisStatus.Online => NetworkStatus.Online,
             ThisStatus.Faulted => NetworkStatus.UnexpectedResult,
+            ThisStatus.Rejected => NetworkStatus.NoNodeKey,
+            ThisStatus.Leaving => NetworkStatus.Offline,
             _ => NetworkStatus.Offline
         };
     }
@@ -308,7 +354,8 @@ internal class Protocol
             return responseString; // Return the hash as a string for verification
     }
 
-    internal sealed record HelloMessage(string NodeName, string? NodeKey);
+    internal sealed record HelloMessage(string NodeName, string? NodeKey, int ListenerPort);
+    internal sealed record HelloResult(string NodeName, int ListenerPort, NetworkStatus Status);
     internal async Task<string> SendCommand(CommandDTO command)
     {
         // Ensure this instance is a client before sending a system message

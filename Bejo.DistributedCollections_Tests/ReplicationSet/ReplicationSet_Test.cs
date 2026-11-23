@@ -212,6 +212,31 @@ public class ReplicationSetTest
     }
 
     [Fact]
+    public async Task LeaveAsync_RemovesNodeFromCluster()
+    {
+        var set1 = new ReplicationSet(new ReplicationSetSettings("NodeA", 13071, false, null,
+            [new NodeSettings("localhost", 13072, TimeSpan.FromMinutes(1))], 3, TimeSpan.FromSeconds(2)));
+        var set2 = new ReplicationSet(new ReplicationSetSettings("NodeB", 13072, false, null,
+            [new NodeSettings("localhost", 13071, TimeSpan.FromMinutes(1))], 3, TimeSpan.FromSeconds(2)));
+
+        await WaitForReplicationSetToStart([set1, set2]);
+
+        var set3 = new ReplicationSet(new ReplicationSetSettings("NodeC", 13073, false, null,
+            [new NodeSettings("localhost", 13071, TimeSpan.FromMinutes(1))], 3, TimeSpan.FromSeconds(2)));
+
+        await WaitForNetworkCount(set1, 2);
+        await WaitForNetworkCount(set2, 2);
+        await WaitForNetworkCount(set3, 2);
+
+        await set3.LeaveAsync();
+
+        await WaitForNetworkCount(set1, 1);
+        await WaitForNetworkCount(set2, 1);
+        set3.GetReplicationSetStatus().ThisStatus.Should().Be(ThisStatus.Stopped);
+        set3.GetReplicationSetStatus().ServerStarted.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task NewReplicationSet_WithSourceData_DataSynchronized()
     {
         // Start first replication set
@@ -261,5 +286,18 @@ public class ReplicationSetTest
             rs.GetReplicationSetStatus().ThisStatus.Should().NotBe(ThisStatus.Faulted);
             await Task.Delay(25);
         }
+    }
+
+    private async Task WaitForNetworkCount(ReplicationSet rs, int expectedCount)
+    {
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            if (rs.GetReplicationSetStatus().NetworkStats.Count() == expectedCount)
+                return;
+
+            await Task.Delay(50);
+        }
+
+        rs.GetReplicationSetStatus().NetworkStats.Count().Should().Be(expectedCount);
     }
 }
