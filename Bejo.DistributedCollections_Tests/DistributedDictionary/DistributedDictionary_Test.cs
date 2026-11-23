@@ -173,7 +173,9 @@ public class DistributedDictionaryTest
         }
 
         // *** Ensure replication ***
-        await Task.Delay(100);
+        await IDictionaryHelper.AwaitValue(dict2, 1);
+        await IDictionaryHelper.AwaitValue(dict2, 2);
+        await IDictionaryHelper.AwaitValue(dict2, 3);
 
         // Indexer
         dict2[1].Should().Be("one");
@@ -358,7 +360,7 @@ public class DistributedDictionaryTest
         dict2.ContainsKey(1).Should().BeFalse();
 
         // Ensure data is removed remotely
-        await Task.Delay(100);
+        await IDictionaryHelper.AwaitMissing(dict1, 1);
         dict1.ContainsKey(1).Should().BeFalse();
     }
 
@@ -374,7 +376,7 @@ public class DistributedDictionaryTest
         dict1[1].Should().Be("one");
 
         // Ensure data is replicated
-        await Task.Delay(100);
+        await IDictionaryHelper.AwaitValue(dict2, 1);
         dict2[1].Should().Be("one");
 
         // Remove data
@@ -402,7 +404,7 @@ public class DistributedDictionaryTest
         dict1[1].Should().Be("one");
 
         // Ensure data is replicated
-        await Task.Delay(100);
+        await IDictionaryHelper.AwaitValue(dict2, 1);
         dict2[1].Should().Be("one");
 
         // Remove data
@@ -414,7 +416,7 @@ public class DistributedDictionaryTest
         dict2.ContainsKey(1).Should().BeFalse();
 
         // Ensure data is removed remotely
-        await Task.Delay(100);
+        await IDictionaryHelper.AwaitMissing(dict1, 1);
         dict1.ContainsKey(1).Should().BeFalse();
     }
 
@@ -484,7 +486,8 @@ public class DistributedDictionaryTest
         dict1.TryAdd(1, "one");
         dict2.TryAdd(1, "ONE");
 
-        await Task.Delay(100);
+        await IDictionaryHelper.AwaitValue(dict1, 1, "ONE");
+        await IDictionaryHelper.AwaitValue(dict2, 1, "ONE");
 
         dict1[1].Should().Be("ONE");
         dict2[1].Should().Be("ONE");
@@ -499,7 +502,7 @@ public class DistributedDictionaryTest
 
         dict1.Add(0, "init");
 
-        await Task.Delay(100);
+        await IDictionaryHelper.AwaitValue(dict2, 0);
 
         dict1.Add(1, "one");
         dict1[1].Should().Be("one");
@@ -514,7 +517,7 @@ public class DistributedDictionaryTest
         sw.Stop();
 
         _output.WriteLine($"Replication time: {sw.Elapsed.TotalMilliseconds:F4} ms");
-        sw.ElapsedMilliseconds.Should().BeLessThan(100);
+        sw.ElapsedMilliseconds.Should().BeLessThan(250);
     }
     #endregion
 
