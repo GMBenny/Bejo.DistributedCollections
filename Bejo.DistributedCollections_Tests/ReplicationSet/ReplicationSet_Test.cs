@@ -6,7 +6,7 @@ namespace Bejo.DistributedCollections_Tests;
 public class ReplicationSetTest
 {
     [Fact]
-    public void ReplicationSetStatus_ServerNotStarted_Offline()
+    public void GetReplicationSetStatus_WithUnavailablePeer_SyncingData()
     {
         var settings = new ReplicationSetSettings(
             "NodeA", 13001, false, null,
@@ -26,7 +26,7 @@ public class ReplicationSetTest
     }
 
     [Fact]
-    public async Task SendMessage_Sunshine_MessageReceived()
+    public async Task SendMessage_ConnectedWithoutPassword_MessageReceived()
     {
         string messageReceived = string.Empty;
 
@@ -43,7 +43,7 @@ public class ReplicationSetTest
     }
 
     [Fact]
-    public async Task SendMessage_WithPassword_MessageReceived()
+    public async Task SendMessage_ConnectedWithPassword_MessageReceived()
     {
         string messageReceived = string.Empty;
 
@@ -60,7 +60,7 @@ public class ReplicationSetTest
     }
 
     [Fact]
-    public async Task SendMessage_WithPasswordUpdate_MessageReceived()
+    public async Task SendMessage_MasterKeyUpdated_MessageReceived()
     {
         string messageReceived = string.Empty;
 
@@ -103,7 +103,7 @@ public class ReplicationSetTest
     }
 
     [Fact]
-    public void CycleReplicationSet_NoFileTobeginWith_DictionaryContent()
+    public void RestartReplicationSet_WithPersistedDictionary_DictionaryRestored()
     {
         var persistPath = Directory.CreateTempSubdirectory("Bejo.DistributedCollections_").FullName;
 
@@ -138,7 +138,7 @@ public class ReplicationSetTest
     }
 
     [Fact]
-    public async Task NewReplicationSetInCluster_FunctioningCluster_TwoNodeCluster() // Without nodeKey every node are accepted
+    public async Task NewReplicationSet_WithoutNodeKey_TwoNodeCluster() // Without nodeKey every node are accepted
     {
         // Start first replication set
         var set1 = new ReplicationSet(new ReplicationSetSettings("NodeA", 13031, false, null, [], 3, new TimeSpan(0, 0, 2)));
@@ -154,6 +154,10 @@ public class ReplicationSetTest
 
         // Await both are started
         await WaitForReplicationSetToStart([set1, set2]);
+        await Task.Delay(1000); // Give some time for the nodes to recognize each other
+
+        var d1 = set1.GetReplicationSetStatus();
+        var d2 = set2.GetReplicationSetStatus();
 
         // Both nods should now see each other in the cluster
         set1.GetReplicationSetStatus().NetworkStats.Count().Should().Be(1);
@@ -161,7 +165,7 @@ public class ReplicationSetTest
     }
 
     [Fact]
-    public async Task NewReplicationSetInCluster_WithCorrectCode_TwoNodeCluster()
+    public async Task NewReplicationSet_WithMatchingNodeKey_TwoNodeCluster()
     {
         // Start first replication set
         var set1 = new ReplicationSet(new ReplicationSetSettings("NodeA", 13041, false, null, [], 3, new TimeSpan(0, 0, 2), null, "abc123!!"));
@@ -177,6 +181,7 @@ public class ReplicationSetTest
 
         // Await both are started
         await WaitForReplicationSetToStart([set1, set2]);
+        await Task.Delay(1000); // Give the incoming handshake time to update NodeA
 
         // Both nods should now see each other in the cluster
         set1.GetReplicationSetStatus().NetworkStats.Count().Should().Be(1);
@@ -184,7 +189,7 @@ public class ReplicationSetTest
     }
 
     [Fact]
-    public async Task NewReplicationSetInCluster_WithIncorrectCode_OneNodeCluster()
+    public async Task NewReplicationSet_WithMismatchingNodeKey_OneNodeCluster()
     {
         // Start first replication set
         var set1 = new ReplicationSet(new ReplicationSetSettings("NodeA", 13051, false, null, [], 3, new TimeSpan(0, 0, 2), null, "abc123!!"));
@@ -207,7 +212,7 @@ public class ReplicationSetTest
     }
 
     [Fact]
-    public async Task NewReplicationSetInCluster_FunctioningCluster_WithDataSync()
+    public async Task NewReplicationSet_WithSourceData_DataSynchronized()
     {
         // Start first replication set
         var set1 = new ReplicationSet(new ReplicationSetSettings("NodeA", 13061, false, null, [], 3, new TimeSpan(0, 0, 2)));
@@ -227,6 +232,7 @@ public class ReplicationSetTest
 
         // Await both are started : set2 outh to be cycleing through Offline, LoadingData, Syncing, Online and then it's ready
         await WaitForReplicationSetToStart([set1, set2]);
+        await WaitForReplicationSetToBeOnline(set2);
 
         var d2 = set2.GetOrCreateDistributedDictionary<int, string>("myDictionary", (key, localValue, distributedValue) => localValue.Value);
         d2[1].Should().Be("one");
@@ -245,6 +251,15 @@ public class ReplicationSetTest
             {
                 await Task.Delay(25);
             }
+        }
+    }
+
+    private async Task WaitForReplicationSetToBeOnline(ReplicationSet rs)
+    {
+        while (rs.GetReplicationSetStatus().ThisStatus != ThisStatus.Online)
+        {
+            rs.GetReplicationSetStatus().ThisStatus.Should().NotBe(ThisStatus.Faulted);
+            await Task.Delay(25);
         }
     }
 }

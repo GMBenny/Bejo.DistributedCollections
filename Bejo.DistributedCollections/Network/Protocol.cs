@@ -10,23 +10,49 @@ internal class Protocol
     // Either one is in use, depending on whether this instance is a client or a server
     private readonly Client? _client;
     private readonly ICommandReceiver? _receiver;
+    private readonly string? _nodeName;
+    private readonly string? _nodeKey;
+    private readonly string? _acceptedNodeKey;
+    private readonly Func<ThisStatus>? _statusProvider;
+    private readonly Action<string, string, NetworkStatus>? _peerConnected;
     private string Address = "";
 
     // Constructor for Clients
-    internal Protocol(string host, int port, int retryCount, TimeSpan timeout, bool compress, string? masterKey)
+    internal Protocol(string host, int port, int retryCount, TimeSpan timeout, bool compress, string? masterKey, string? nodeName = null, string? nodeKey = null)
     {
         _client = new Client(host, port, retryCount, timeout, compress, masterKey);
         Address = $"{host}:{port}";
+        _nodeName = nodeName;
+        _nodeKey = nodeKey;
     }
 
     // Constructor for Servers
-    internal Protocol(ICommandReceiver receiver)
+    internal Protocol(ICommandReceiver receiver, string? nodeName = null, string? nodeKey = null, Func<ThisStatus>? statusProvider = null, Action<string, string, NetworkStatus>? peerConnected = null)
     {
         _receiver = receiver;
+        _nodeName = nodeName;
+        _acceptedNodeKey = nodeKey;
+        _statusProvider = statusProvider;
+        _peerConnected = peerConnected;
     }
 
     #region Server-side methods for handling incoming messages
     internal byte[] MessageHandler(byte[] message)
+    {
+        return HandleMessage(message, authenticated: true).Response;
+    }
+
+    internal ConnectionHandlerResult AuthenticatedMessageHandler(byte[] message, bool authenticated)
+    {
+        return HandleMessage(message, authenticated);
+    }
+
+    internal ConnectionHandlerResult AuthenticatedMessageHandlerWithAddress(byte[] message, bool authenticated, string? remoteAddress)
+    {
+        return HandleMessage(message, authenticated, remoteAddress);
+    }
+
+    private ConnectionHandlerResult HandleMessage(byte[] message, bool authenticated, string? remoteAddress = null)
     {
         IsServerCheck();
 
@@ -37,9 +63,59 @@ internal class Protocol
         {
             string type = new string(messageString.Skip("SYSTEM:".Length).ToArray());
 
-            if (type.StartsWith("PING")) // A simple ping - returns utc-ticks
+            if (type.StartsWith("HELLO:"))
             {
-                return Encoding.UTF8.GetBytes(DateTime.UtcNow.Ticks.ToString());
+                try
+                {
+                    var content = VerifyAndExtractMessage("SYSTEM:HELLO:", message);
+                    var hello = JsonSerializer.Deserialize<HelloMessage>(content.Message) ?? throw new InvalidOperationException("Invalid hello message.");
+
+                    var accepted = string.Equals(_acceptedNodeKey, hello.NodeKey, StringComparison.Ordinal);
+
+                    if (!accepted)
+                        return Result("Error: Node key rejected.", authenticated: false, closeConnection: true);
+
+                    var status = _statusProvider?.Invoke() ?? ThisStatus.Online;
+                    _peerConnected?.Invoke(hello.NodeName, remoteAddress ?? hello.NodeName, ToNetworkStatus(status));
+                    return Result($"OK:{_nodeName ?? string.Empty}:{status}", authenticated: true, closeConnection: false);
+                }
+                catch (Exception ex)
+                {
+                    return Result($"Error: {ex.Message}", authenticated: false, closeConnection: true);
+                }
+            }
+
+            // If not authenticated, reject all system and collection commands until HELLO is approved.
+            if (!authenticated)
+                return Result("Error: Authentication required.", authenticated: false, closeConnection: true);
+
+            if (type.StartsWith("SYNC:"))
+            {
+                try
+                {
+                    // Initial sync uses a separate system protocol and not regular
+                    // replication commands, so sync does not create replication loops.
+                    if (_receiver is not ISyncReceiver syncReceiver)
+                        throw new InvalidOperationException("Sync is not supported by this receiver.");
+
+                    var content = VerifyAndExtractMessage("SYSTEM:SYNC:", message);
+                    var request = JsonSerializer.Deserialize<SyncRequest>(content.Message) ?? throw new InvalidOperationException("Invalid sync request.");
+                    var response = syncReceiver.HandleSyncRequest(request);
+                    return Result(JsonSerializer.Serialize(response), authenticated, false);
+                }
+                catch (Exception ex)
+                {
+                    return Result($"Error: {ex.Message}", authenticated, false);
+                }
+            }
+            else if (type.StartsWith("PING")) // A simple ping - returns utc-ticks
+            {
+                var status = _statusProvider?.Invoke().ToString() ?? ThisStatus.Online.ToString();
+                return Result($"{DateTime.UtcNow.Ticks}:{status}", authenticated, false);
+            }
+            else if (type.StartsWith("STATUS"))
+            {
+                return Result(_statusProvider?.Invoke().ToString() ?? ThisStatus.Online.ToString(), authenticated, false);
             }
             else if (type.StartsWith("MESSAGE:")) // A message containing a hash and the actual message content
             {
@@ -50,14 +126,14 @@ internal class Protocol
                     var messageHash = Helpers.Helper.Hash(content.Message);
 
                     // Do stuff with content.Message
-                    _receiver.HandleCommand(new CommandDTO("", Encoding.UTF8.GetString(content.Message), ChangeType.Message, 0, 0));
+                    _receiver!.HandleCommand(new CommandDTO("", Encoding.UTF8.GetString(content.Message), ChangeType.Message, 0, 0));
 
                     // Return this hash for verification on client side
-                    return Encoding.UTF8.GetBytes(messageHash.ToString());
+                    return Result(messageHash.ToString(), authenticated, false);
                 }
                 catch (Exception ex)  // Somethings went wrong, but we don't trust the message
                 {
-                    return Encoding.UTF8.GetBytes($"Error: {ex.Message}");
+                    return Result($"Error: {ex.Message}", authenticated, false);
                 }
             }
         }
@@ -80,17 +156,22 @@ internal class Protocol
                     _receiver!.HandleCommand(command);
 
                     // Return this hash for verification on client side
-                    return Encoding.UTF8.GetBytes(content.Hash.ToString());
+                    return Result(content.Hash.ToString(), authenticated, false);
                 }
                 catch (Exception ex)  // Somethings went wrong, but we don't trust the message
                 {
-                    return Encoding.UTF8.GetBytes($"Error: {ex.Message}");
+                    return Result($"Error: {ex.Message}", authenticated, false);
                 }
             }
         }
 
         // If we reach this point, the message was not recognized
-        return Encoding.UTF8.GetBytes($"Error: Unrecognized message format.");
+        return Result("Error: Unrecognized message format.", authenticated, false);
+    }
+
+    private static ConnectionHandlerResult Result(string response, bool authenticated, bool closeConnection)
+    {
+        return new ConnectionHandlerResult(Encoding.UTF8.GetBytes(response), authenticated, closeConnection);
     }
     #endregion
 
@@ -109,16 +190,23 @@ internal class Protocol
             stopWatch.Start();
 
             // Send the ping message to the server
-            var response = await _client.SendAsync(Encoding.UTF8.GetBytes("SYSTEM:PING"));
+            var response = await _client!.SendAsync(Encoding.UTF8.GetBytes("SYSTEM:PING"));
 
             stopWatch.Stop();
             var endTime = DateTime.UtcNow;
 
             // We expect the response to be the server's UTC time in ticks as a string
-            if (long.TryParse(Encoding.UTF8.GetString(response), out long ticks))
+            var responseText = Encoding.UTF8.GetString(response);
+            var responseParts = responseText.Split(':', 2);
+            if (long.TryParse(responseParts[0], out long ticks))
             {
                 if (startTime.Ticks < ticks && ticks < endTime.Ticks)
-                    return new NetworkStat(Address, endTime, NetworkStatus.Online, stopWatch.Elapsed);
+                {
+                    var status = responseParts.Length == 2 && Enum.TryParse<ThisStatus>(responseParts[1], out var remoteStatus)
+                        ? ToNetworkStatus(remoteStatus)
+                        : NetworkStatus.Online;
+                    return new NetworkStat(Address, endTime, status, stopWatch.Elapsed);
+                }
                 else
                     return new NetworkStat(Address, endTime, NetworkStatus.TimeProblem, stopWatch.Elapsed);
             }
@@ -129,6 +217,73 @@ internal class Protocol
         {
             return new NetworkStat(Address, DateTime.UtcNow, NetworkStatus.Offline, TimeSpan.Zero);
         }
+    }
+
+    internal async Task<NetworkStatus> SendHelloAsync()
+    {
+        IsClientCheck();
+
+        if (_nodeName == null)
+            throw new InvalidOperationException("A node name is required for a handshake.");
+
+        // Prepare the hello message with the node name and optional node key
+        var hello = new HelloMessage(_nodeName, _nodeKey);
+        
+        // Serialize the hello message to JSON and compute its hash for integrity verification
+        var message = JsonSerializer.SerializeToUtf8Bytes(hello);
+
+        // Send the hello message to the server and await the response
+        var hash = Helpers.Helper.Hash(message);
+
+        // Prepare the message bytes to be sent, including the hash for verification
+        var request = Encoding.UTF8.GetBytes($"SYSTEM:HELLO:{hash}:{Encoding.UTF8.GetString(message)}");
+
+        // Send the message to the server and await the response
+        var response = await _client!.SendAsync(request);
+
+        // Convert the response bytes back to a string for processing
+        var responseText = Encoding.UTF8.GetString(response);
+
+        // Check if the response indicates an error
+        if (!responseText.StartsWith("OK:", StringComparison.Ordinal))
+            throw new InvalidOperationException(responseText);
+
+        // Extract the status from the response and convert it to a NetworkStatus enum
+        var responseParts = responseText.Split(':');
+        if (responseParts.Length < 3 ||
+            !Enum.TryParse<ThisStatus>(responseParts[2], out var remoteStatus))
+            throw new InvalidOperationException("Invalid handshake response.");
+
+        // Return the corresponding NetworkStatus based on the remote status
+        return ToNetworkStatus(remoteStatus);
+    }
+
+    internal async Task<SyncResponse> SendSyncRequestAsync(SyncRequest request)
+    {
+        IsClientCheck();
+
+        var payload = JsonSerializer.SerializeToUtf8Bytes(request);
+        var payloadHash = Helpers.Helper.Hash(payload);
+        var message = Encoding.UTF8.GetBytes($"SYSTEM:SYNC:{payloadHash}:{Encoding.UTF8.GetString(payload)}");
+        var response = await _client!.SendAsync(message);
+        var responseText = Encoding.UTF8.GetString(response);
+
+        if (responseText.StartsWith("Error:", StringComparison.Ordinal))
+            throw new InvalidOperationException(responseText);
+
+        return JsonSerializer.Deserialize<SyncResponse>(responseText) ?? throw new InvalidOperationException("Invalid sync response.");
+    }
+
+    private static NetworkStatus ToNetworkStatus(ThisStatus status)
+    {
+        return status switch
+        {
+            ThisStatus.LoadingData => NetworkStatus.LoadingData,
+            ThisStatus.SyncingData => NetworkStatus.SyncingData,
+            ThisStatus.Online => NetworkStatus.Online,
+            ThisStatus.Faulted => NetworkStatus.UnexpectedResult,
+            _ => NetworkStatus.Offline
+        };
     }
     internal async Task<string> SendSystemMessage(string message)
     {
@@ -142,7 +297,7 @@ internal class Protocol
         var messageBytes = Encoding.UTF8.GetBytes("SYSTEM:MESSAGE:" + messageHash + ":" + message);
 
         // Send the message to the server and await the response
-        var response = await _client.SendAsync(messageBytes);
+        var response = await _client!.SendAsync(messageBytes);
 
         var responseString = Encoding.UTF8.GetString(response);
         if (!ulong.TryParse(responseString, out ulong responseHash)) // If response is not a hash-code, then it is an error
@@ -152,6 +307,8 @@ internal class Protocol
         else
             return responseString; // Return the hash as a string for verification
     }
+
+    internal sealed record HelloMessage(string NodeName, string? NodeKey);
     internal async Task<string> SendCommand(CommandDTO command)
     {
         // Ensure this instance is a client before sending a system message
@@ -166,7 +323,7 @@ internal class Protocol
         var messageBytes = Encoding.UTF8.GetBytes($"COLLECTION:COMMAND:{messageHash}:{messageText}");
 
         // Send the message to the server and await the response
-        var response = await _client.SendAsync(messageBytes);
+        var response = await _client!.SendAsync(messageBytes);
 
         var responseString = Encoding.UTF8.GetString(response);
         if (!ulong.TryParse(responseString, out ulong responseHash)) // If response is not a hash-code, then it is an error

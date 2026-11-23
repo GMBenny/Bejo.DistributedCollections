@@ -8,7 +8,7 @@ namespace Bejo.DistributedCollections;
 
 
 // Manages a set of distributed collections and handles replication commands
-public class ReplicationSet : ICommandReceiver
+public class ReplicationSet : ICommandReceiver, ISyncReceiver
 {
     // Local storage for all distributed collections, keyed by collection name
     // TODO: Disse to er begge CollectionName som key, men forskellig indhold. De bør slåes sammen
@@ -19,6 +19,7 @@ public class ReplicationSet : ICommandReceiver
     private ReplicationSetSettings _replicationSetSettings;
     private readonly object _statusLock = new();
     private ThisStatus _thisStatus = ThisStatus.Starting;
+    private readonly List<ThisStatus> _statusHistory = new() { ThisStatus.Starting };
 
     // Manages server and client communication for replication
     private readonly ReplicationManager _replicationManager;
@@ -32,8 +33,10 @@ public class ReplicationSet : ICommandReceiver
     // Create a new ReplicationSet with the specified settings, initializing the replication manager and command sender
     public ReplicationSet(ReplicationSetSettings replicationSetSettings, Action<string>? messageHandler = null)
     {
+        // Validate that replicationSetSettings is not null
         ArgumentNullException.ThrowIfNull(replicationSetSettings);
 
+        // Validate that the persist path exists if specified
         if (replicationSetSettings.persistPath != null && !Directory.Exists(replicationSetSettings.persistPath))
             throw new ArgumentException("Persist path must exist or be null.", nameof(replicationSetSettings.persistPath));
 
@@ -42,11 +45,12 @@ public class ReplicationSet : ICommandReceiver
         _commandSender = _replicationManager;
         _messageHandler = messageHandler;
 
-        // Start listening before loading local data. Server readiness and node readiness
-        // are separate states.
+        // Start the replication manager/server to handle incoming and outgoing replication commands
         _replicationManager.Start();
 
         SetLocalStatus(ThisStatus.LoadingData);
+
+        // Load existing collection metadata from the persist path if specified, and recreate collections from file
         if (replicationSetSettings.persistPath != null)
         {
             _recreateCollectionMetadata = Helpers.Helper.LoadFromFile("DistributedCollections", replicationSetSettings.persistPath, new Dictionary<string, string>());
@@ -62,10 +66,24 @@ public class ReplicationSet : ICommandReceiver
 
         SetLocalStatus(ThisStatus.SyncingData);
 
-        // There is nothing to synchronize for a standalone node. Nodes with
-        // configured peers remain in SyncingData until the sync phase is implemented.
-        if (replicationSetSettings.nodes.Length == 0)
+        // If there are no other nodes in the replication set
+        if (replicationSetSettings.nodes.Length == 0) // set the local status to Online;
             SetLocalStatus(ThisStatus.Online);
+        else
+            _ = CompleteInitialSynchronizationAsync(); // otherwise, start the initial synchronization process
+    }
+    private async Task CompleteInitialSynchronizationAsync()
+    {
+        try
+        {
+            await _replicationManager.SynchronizeAsync(this);
+            SetLocalStatus(ThisStatus.Online);
+        }
+        catch (Exception ex)
+        {
+            _messageHandler?.Invoke($"Initial synchronization failed: {ex.Message}");
+            SetLocalStatus(ThisStatus.Faulted);
+        }
     }
 
     public void UpdateMasterKeys(string[]? masterKeys)
@@ -95,20 +113,78 @@ public class ReplicationSet : ICommandReceiver
             localStatus = _thisStatus;
         }
 
-        return new ReplicationSetStatus(
-            _replicationSetSettings.nodeName,
-            localStatus,
-            _replicationManager?.GetNetworkStats() ?? Array.Empty<NetworkStat>(),
-            _replicationManager?.ServerState == Server.ServerState.Started);
+        return new ReplicationSetStatus(_replicationSetSettings.nodeName, localStatus, _replicationManager?.GetNetworkStats ?? Array.Empty<NetworkStat>(), _replicationManager?.ServerState == Server.ServerState.Started);
     }
 
     internal void SetLocalStatus(ThisStatus status)
     {
         lock (_statusLock)
         {
-            _thisStatus = status;
+            if (_thisStatus != status)
+            {
+                _thisStatus = status;
+                _statusHistory.Add(status);
+            }
         }
     }
+
+    internal ThisStatus GetLocalStatus()
+    {
+        lock (_statusLock)
+        {
+            return _thisStatus;
+        }
+    }
+
+    internal ThisStatus[] GetLocalStatusHistory()
+    {
+        lock (_statusLock)
+        {
+            return _statusHistory.ToArray();
+        }
+    }
+
+    // Create and ensure local collection exists
+    internal void EnsureSyncCollection(SyncCollectionMetadata metadata)
+    {
+        lock (_collectionsLock)
+        {
+            // Get collection metadata from name and ensure the local node has same collection type
+            if (_distributedCollections.TryGetValue(metadata.Name, out var existing))
+            {
+                if (!string.Equals(existing.CollectionType, metadata.CollectionType, StringComparison.Ordinal))
+                    throw new InvalidOperationException($"Collection '{metadata.Name}' has a different type.");
+
+                return;
+            }
+
+            // Create the collection from metadata
+            var dictionaryTypeInfo = JsonSerializer.Deserialize<DictionaryTypeInfo>(metadata.Metadata)
+                ?? throw new InvalidOperationException($"Invalid metadata for collection '{metadata.Name}'.");
+
+            // Validate and create the distributed dictionary
+            ValidateAndCreateDistributedDictionary(metadata.Name, dictionaryTypeInfo);
+            _recreateCollectionMetadata[metadata.Name] = metadata.Metadata;
+            
+            // Persist the collection metadata if a persist path is specified
+            if (_replicationSetSettings.persistPath != null)
+                Helpers.Helper.SaveToFile("DistributedCollections", _replicationSetSettings.persistPath, _recreateCollectionMetadata);
+        }
+    }
+
+    internal IDistributedCollectionNode GetSyncCollectionNode(string collectionName)
+    {
+        lock (_collectionsLock)
+        {
+            if (_distributedCollections.TryGetValue(collectionName, out var collection))
+                return collection.Node;
+        }
+
+        throw new InvalidOperationException($"Collection '{collectionName}' does not exist.");
+    }
+
+
+
 
     // Send a message to all nodes in the replication set
     public async Task SendMessage(string message)
@@ -247,6 +323,65 @@ public class ReplicationSet : ICommandReceiver
             {
                 throw new InvalidOperationException($"Collection '{command.CollectionName}' does not exist.");
             }
+        }
+    }
+
+    SyncResponse ISyncReceiver.HandleSyncRequest(SyncRequest request)
+    {
+        if (GetLocalStatus() != ThisStatus.Online)
+            throw new InvalidOperationException("This node is not ready to provide synchronization data.");
+
+        return request.Action switch
+        {
+            "COLLECTIONS" => new SyncResponse(
+                "COLLECTIONS",
+                JsonSerializer.Serialize(_recreateCollectionMetadata.Select(metadata =>
+                {
+                    var typeInfo = JsonSerializer.Deserialize<DictionaryTypeInfo>(metadata.Value)
+                        ?? throw new InvalidOperationException($"Invalid metadata for collection '{metadata.Key}'.");
+                    return new SyncCollectionMetadata(metadata.Key, typeInfo.CollectionType, metadata.Value);
+                }).ToArray())),
+
+            "HASHES" => CreateSyncChangesResponse(request),
+
+            "COMPLETE" => new SyncResponse("COMPLETE", string.Empty),
+
+            _ => throw new InvalidOperationException($"Unsupported sync action '{request.Action}'.")
+        };
+    }
+
+    // Incoming sync request for hashes, return the changes and remote hashes for the specified collection
+    private SyncResponse CreateSyncChangesResponse(SyncRequest request)
+    {
+        // Validate that a collection name is provided for hash synchronization
+        if (string.IsNullOrWhiteSpace(request.CollectionName))
+            throw new InvalidOperationException("A collection name is required for hash synchronization.");
+
+        // Deserialize the requesting hashes from the request payload
+        SyncHash[] requestingHashes = JsonSerializer.Deserialize<SyncHash[]>(request.JsonPayload)
+            ?? throw new InvalidOperationException("Invalid collection hashes.");
+
+        lock (_collectionsLock)
+        {
+            // Ensure the local node has a corresponding sync collection
+            if (!_distributedCollections.TryGetValue(request.CollectionName, out var collection))
+                throw new InvalidOperationException($"Collection '{request.CollectionName}' does not exist.");
+
+            // Group the requesting hashes by key hash for efficient lookup
+            var requestingByKey = requestingHashes.GroupBy(hash => hash.KeyHash).ToDictionary(group => group.Key, group => group.First().ValueHash);
+
+            // Get the local sync entries for the collection and determine which entries have changed compared to the requesting hashes
+            var remoteEntries = collection.Node.GetSyncEntries;
+
+            // Determine which entries have changed compared to the requesting hashes
+            var changes = remoteEntries
+                .Where(entry => !requestingByKey.TryGetValue(entry.KeyHash, out var valueHash) || valueHash != entry.ValueHash)
+                .Select(entry => new SyncChange(entry.KeyJson, entry.JsonObject, ChangeType.AddUpdated, entry.ValueHash))
+                .ToArray();
+
+            var response = new SyncChangesResponse(changes, remoteEntries.Select(entry => new SyncHash(entry.KeyHash, entry.ValueHash)).ToArray());
+
+            return new SyncResponse("HASHES", JsonSerializer.Serialize(response));
         }
     }
     #endregion

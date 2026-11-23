@@ -13,7 +13,7 @@ public class DistributedDictionaryTest
 
     #region CREATE - Port: 1200*
     [Fact]
-    public async Task Add_Sunshine_GetData()
+    public async Task Add_NewData_DataReadable()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12000, 12001);
 
@@ -21,13 +21,13 @@ public class DistributedDictionaryTest
 
         dict1[1].Should().Be("one");
 
-        await Task.Delay(100);
+        await IDictionaryHelper.AwaitValue(dict2, 1);
 
         dict2[1].Should().Be("one");
     }
-    
+
     [Fact]
-    public async Task Add_ExcistingData_GetData()
+    public async Task Add_ExistingData_DataReadable()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12002, 12003);
 
@@ -38,7 +38,7 @@ public class DistributedDictionaryTest
         dict1[1].Should().Be("one");
 
         // Ensure data is replicated
-        await Task.Delay(100);
+        await IDictionaryHelper.AwaitValue(dict2, 1);
         dict2[1].Should().Be("one");
 
         // Try to add the same key again
@@ -50,7 +50,7 @@ public class DistributedDictionaryTest
     }
 
     [Fact]
-    public async Task TryAdd_Sunshine_GetData()
+    public async Task TryAdd_NewData_DataReadable()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12004, 12005);
 
@@ -59,13 +59,12 @@ public class DistributedDictionaryTest
         b1.Should().BeTrue();
         dict1[1].Should().Be("one");
 
-        await Task.Delay(100);
-
+        await IDictionaryHelper.AwaitValue(dict2, 1);
         dict2[1].Should().Be("one");
     }
 
     [Fact]
-    public async Task TryAdd_ExcistingData_ReturnsFalse()
+    public async Task TryAdd_ExistingData_ReturnsFalse()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12006, 12007);
 
@@ -76,13 +75,12 @@ public class DistributedDictionaryTest
         
         dict1[1].Should().Be("one");
 
-        await Task.Delay(100);
-
+        await IDictionaryHelper.AwaitValue(dict2, 1);
         dict2[1].Should().Be("one");
     }
 
     [Fact]
-    public async Task AddKeyValuePair_Sunshine_GetData()
+    public async Task AddKeyValuePair_NewData_DataReadable()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12008, 12009);
 
@@ -90,7 +88,7 @@ public class DistributedDictionaryTest
 
         dict1[1].Should().Be("one");
 
-        await Task.Delay(100);
+        await IDictionaryHelper.AwaitValue(dict2, 1);
 
         dict2[1].Should().Be("one");
     }
@@ -98,7 +96,7 @@ public class DistributedDictionaryTest
 
     #region READ - Port: 1203*
     [Fact]
-    public async Task Read_Sunshine_GetData()
+    public async Task Read_ExistingData_DataReadable()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12031, 12032);
 
@@ -247,7 +245,7 @@ public class DistributedDictionaryTest
     }
 
     [Fact]
-    public async Task Read_MissingData_Exception()
+    public async Task Read_MissingData_ThrowsException()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12033, 12034);
 
@@ -308,7 +306,7 @@ public class DistributedDictionaryTest
 
     #region UPDATE - Port: 1202*
     [Fact]
-    public async Task Update_Sunshine_GetData()
+    public async Task Update_ExistingKey_DataReadable()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12021, 12022);
 
@@ -324,7 +322,7 @@ public class DistributedDictionaryTest
     }
 
     [Fact]
-    public async Task Update_MissingKey_Error()
+    public async Task Update_MissingKey_ReturnsError()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12023, 12024);
 
@@ -337,7 +335,7 @@ public class DistributedDictionaryTest
 
     #region DELETE - Port: 1201*
     [Fact]
-    public async Task Remove_Sunshine_GetData()
+    public async Task Remove_ExistingKey_DataRemoved()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12010, 12011);
 
@@ -348,7 +346,7 @@ public class DistributedDictionaryTest
         dict1[1].Should().Be("one");
 
         // Ensure data is replicated
-        await Task.Delay(100);
+        await IDictionaryHelper.AwaitValue(dict2, 1);
         dict2[1].Should().Be("one");
 
         // Remove data
@@ -365,7 +363,7 @@ public class DistributedDictionaryTest
     }
 
     [Fact]
-    public async Task Remove_NonexcistingDeleteData_GetData()
+    public async Task Remove_NonexistingKey_DataUnchanged()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12012, 12013);
 
@@ -393,7 +391,7 @@ public class DistributedDictionaryTest
     }
 
     [Fact]
-    public async Task RemoveKeyValuePair_Sunshine_GetData()
+    public async Task RemoveKeyValuePair_ExistingKey_DataRemoved()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12014, 12015);
 
@@ -421,7 +419,7 @@ public class DistributedDictionaryTest
     }
 
     [Fact]
-    public async Task RemoveKeyValuePair_NonexcistingDeleteData1_GetData()
+    public async Task RemoveKeyValuePair_WrongKey_DataUnchanged()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12016, 12017);
 
@@ -432,7 +430,7 @@ public class DistributedDictionaryTest
         dict1[1].Should().Be("one");
 
         // Ensure data is replicated
-        await Task.Delay(100);
+        await IDictionaryHelper.AwaitValue(dict2, 1);
         dict2[1].Should().Be("one");
 
         // Remove data
@@ -449,7 +447,7 @@ public class DistributedDictionaryTest
     }
 
     [Fact]
-    public async Task RemoveKeyValuePair_NonexcistingDeleteData2_GetData()
+    public async Task RemoveKeyValuePair_WrongValue_DataUnchanged()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12018, 12019);
 
@@ -460,7 +458,7 @@ public class DistributedDictionaryTest
         dict1[1].Should().Be("one");
 
         // Ensure data is replicated
-        await Task.Delay(100);
+        await IDictionaryHelper.AwaitValue(dict2, 1);
         dict2[1].Should().Be("one");
 
         // Remove data
@@ -479,7 +477,7 @@ public class DistributedDictionaryTest
 
     #region CONFLICT - Port: 121**
     [Fact]
-    public async Task HandleConflict_Conflict_SameData()
+    public async Task HandleConflict_ConflictingData_ResolvedData()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12191, 12192);
 
@@ -495,7 +493,7 @@ public class DistributedDictionaryTest
 
     #region Replication speed - Port: 122**
     [Fact]
-    public async Task ReplicationSpeed_Sunshine_GetData()
+    public async Task ReplicationSpeed_ReplicatedData_DataReadable()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12200, 12201);
 
@@ -522,7 +520,7 @@ public class DistributedDictionaryTest
 
     #region Events - Port: 1221*
     [Fact]
-    public async Task ChangeData_Shunshine_Events()
+    public async Task ChangeData_ChangedValue_EventRaised()
     {
         int? testKey = null;
 
@@ -546,7 +544,7 @@ public class DistributedDictionaryTest
         dict1.Add(12, "Twelve");
 
         // Wait for replication and event handling
-        await Task.Delay(100);
+        await IDictionaryHelper.AwaitValue(dict2, 12);
 
         // testKey should now be set to 12 
         testKey.Should().NotBeNull();

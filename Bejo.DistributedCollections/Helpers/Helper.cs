@@ -54,7 +54,7 @@ internal static class Helper
 
             return data ?? defaultValue;
         }
-        catch (Exception e)
+        catch (Exception)
         {
             return defaultValue;
         }

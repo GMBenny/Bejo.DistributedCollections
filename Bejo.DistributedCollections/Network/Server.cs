@@ -16,11 +16,31 @@ internal class Server
     private readonly string[]? _masterKeys;
 
     private readonly Func<byte[], byte[]> _handleRequest;
+    private readonly Func<byte[], bool, ConnectionHandlerResult>? _handleAuthenticatedRequest;
+    private readonly Func<byte[], bool, string?, ConnectionHandlerResult>? _handleAuthenticatedRequestWithAddress;
 
     internal Server(int port, bool compress, string[]? masterKeys, Func<byte[], byte[]> handleRequest)
     {
         _port = port;
         _handleRequest = handleRequest;
+        _compress = compress;
+        _masterKeys = masterKeys;
+    }
+
+    internal Server(int port, bool compress, string[]? masterKeys, Func<byte[], bool, ConnectionHandlerResult> handleRequest)
+    {
+        _port = port;
+        _handleRequest = static _ => throw new InvalidOperationException("The authenticated request handler must be used.");
+        _handleAuthenticatedRequest = handleRequest;
+        _compress = compress;
+        _masterKeys = masterKeys;
+    }
+
+    internal Server(int port, bool compress, string[]? masterKeys, Func<byte[], bool, string?, ConnectionHandlerResult> handleRequest)
+    {
+        _port = port;
+        _handleRequest = static _ => throw new InvalidOperationException("The authenticated request handler must be used.");
+        _handleAuthenticatedRequestWithAddress = handleRequest;
         _compress = compress;
         _masterKeys = masterKeys;
     }
@@ -85,6 +105,7 @@ internal class Server
             try
             {
                 await using var stream = client.GetStream();
+                var authenticated = _handleAuthenticatedRequest == null;
 
                 while (!cancellationToken.IsCancellationRequested)
                 {
@@ -131,13 +152,38 @@ internal class Server
                         }
 
                         if (message != null) {
-                            var response = _handleRequest(message);
+                            byte[] response;
+                            var closeConnection = false;
+
+
+                            if (_handleAuthenticatedRequestWithAddress != null)
+                            {
+                                var result = _handleAuthenticatedRequestWithAddress(message, authenticated, remoteEndPoint?.ToString());
+                                response = result.Response;
+                                authenticated = result.Authenticated;
+                                closeConnection = result.CloseConnection;
+                            }
+                            else if (_handleAuthenticatedRequest != null)
+                            {
+                                var result = _handleAuthenticatedRequest(message, authenticated);
+                                response = result.Response;
+                                authenticated = result.Authenticated;
+                                closeConnection = result.CloseConnection;
+                            }
+                            else
+                            {
+                                response = _handleRequest(message);
+                            }
 
                             await NetworkMessageFraming.WriteAsync(stream, response, cancellationToken);
+
+                            if (closeConnection)
+                                break;
                         }
                     }
                 }
             }
+
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 // The server is shutting down.
@@ -157,3 +203,8 @@ internal class Server
         Console.WriteLine($"Client disconnected: {remoteEndPoint}");
     }
 }
+
+internal readonly record struct ConnectionHandlerResult(
+    byte[] Response,
+    bool Authenticated,
+    bool CloseConnection);
