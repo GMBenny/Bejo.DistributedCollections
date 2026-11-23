@@ -13,7 +13,7 @@ var rs2 = new ReplicationSet(new ("rs2", 10002, true, ["abc123abc"],
 do
 {
     await Task.Delay(25);
-} while (new[] { rs1, rs2 }.All(rs => rs.GetReplicationSetStatus().ThisStatus != ThisStatus.Started));
+} while (new[] { rs1, rs2 }.Any(rs => !rs.GetReplicationSetStatus().ServerStarted));
 
 var d1 = rs1.GetOrCreateDistributedDictionary<int, string>("myDictionary", (k, a, b) => a.CreatedTimestamp < b.CreatedTimestamp ? a.Value : b.Value);
 var d2 = rs2.GetOrCreateDistributedDictionary<int, string>("myDictionary", (k, a, b) => a.CreatedTimestamp < b.CreatedTimestamp ? a.Value : b.Value);

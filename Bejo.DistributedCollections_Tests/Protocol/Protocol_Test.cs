@@ -1,3 +1,4 @@
+using Bejo.DistributedCollections;
 using Bejo.DistributedCollections.Network;
 using Bejo.DistributedCollections.Contracts;
 using FluentAssertions;
@@ -8,7 +9,7 @@ namespace Bejo.DistributedCollections_Tests;
 public class ProtocolTest
 {
     [Fact]
-    public async Task CreateProtocol_Sunshine_NoException()
+    public async Task CreateProtocol_WithServer_NoException()
     {
         var protocolServer = new Protocol(new UnusedReceiver());
 
@@ -19,12 +20,12 @@ public class ProtocolTest
     }
 
     [Fact]
-    public async Task CreateProtocol_NoServer_NoResponse()
+    public async Task CreateProtocol_WithoutServer_NoException()
     {
         var protocolClient = new Protocol("localhost", 11002, 3, new TimeSpan(0, 0, 2), false, null);
     }
     [Fact]
-    public async Task SendPing_NoServer_Exception()
+    public async Task SendPingAsync_WithoutServer_Offline()
     {
         var protocolClient = new Protocol("localhost", 11010, 3, new TimeSpan(0, 0, 2), false, null);
 
@@ -34,7 +35,7 @@ public class ProtocolTest
     }
 
     [Fact]
-    public async Task SendPing_Sunshine_Online()
+    public async Task SendPingAsync_WithOnlineServer_Online()
     {
         var protocolServer = new Protocol(new UnusedReceiver());
 
@@ -50,7 +51,93 @@ public class ProtocolTest
     }
 
     [Fact]
-    public async Task SendSystemMessage_Sunshine_OkHash()
+    public async Task SendPingAsync_WithoutHandshake_AuthenticationRequired()
+    {
+        var protocolServer = new Protocol(new UnusedReceiver(), "Server", "shared-key", () => ThisStatus.LoadingData);
+        var server = new Server(11030, false, null, protocolServer.AuthenticatedMessageHandler);
+        await TestHelpers.WaitForServerToStartAsync(server);
+
+        var protocolClient = new Protocol("localhost", 11030, 3, TimeSpan.FromSeconds(2), false, null, "Client", "shared-key");
+
+        var networkStat = await protocolClient.SendPingAsync();
+
+        networkStat.LastStatus.Should().Be(NetworkStatus.UnexpectedResult);
+    }
+
+    [Fact]
+    public async Task SendHelloAsync_WithMatchingKey_AllowsCommunication()
+    {
+        var protocolServer = new Protocol(new UnusedReceiver(), "Server", "shared-key", () => ThisStatus.LoadingData);
+        var server = new Server(11031, false, null, protocolServer.AuthenticatedMessageHandler);
+        await TestHelpers.WaitForServerToStartAsync(server);
+
+        var protocolClient = new Protocol("localhost", 11031, 3, TimeSpan.FromSeconds(2), false, null, "Client", "shared-key");
+
+        await protocolClient.SendHelloAsync();
+        var networkStat = await protocolClient.SendPingAsync();
+
+        networkStat.LastStatus.Should().Be(NetworkStatus.LoadingData);
+    }
+
+    [Fact]
+    public async Task SendHelloAsync_WithMismatchingKey_ConnectionRejected()
+    {
+        var protocolServer = new Protocol(new UnusedReceiver(), "Server", "shared-key", () => ThisStatus.LoadingData);
+        var server = new Server(11032, false, null, protocolServer.AuthenticatedMessageHandler);
+        await TestHelpers.WaitForServerToStartAsync(server);
+
+        var protocolClient = new Protocol("localhost", 11032, 3, TimeSpan.FromSeconds(2), false, null, "Client", "wrong-key");
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => protocolClient.SendHelloAsync());
+
+        exception.Message.Should().Contain("Node key rejected");
+    }
+
+    [Fact]
+    public async Task SendHelloAsync_ServerHasKeyClientHasNoKey_ConnectionRejected()
+    {
+        var protocolServer = new Protocol(new UnusedReceiver(), "Server", "shared-key", () => ThisStatus.LoadingData);
+        var server = new Server(11033, false, null, protocolServer.AuthenticatedMessageHandler);
+        await TestHelpers.WaitForServerToStartAsync(server);
+
+        var protocolClient = new Protocol("localhost", 11033, 3, TimeSpan.FromSeconds(2), false, null, "Client", null);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => protocolClient.SendHelloAsync());
+
+        exception.Message.Should().Contain("Node key rejected");
+    }
+
+    [Fact]
+    public async Task SendHelloAsync_ServerHasNoKeyClientHasKey_ConnectionRejected()
+    {
+        var protocolServer = new Protocol(new UnusedReceiver(), "Server", null, () => ThisStatus.LoadingData);
+        var server = new Server(11034, false, null, protocolServer.AuthenticatedMessageHandler);
+        await TestHelpers.WaitForServerToStartAsync(server);
+
+        var protocolClient = new Protocol("localhost", 11034, 3, TimeSpan.FromSeconds(2), false, null, "Client", "any-key");
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => protocolClient.SendHelloAsync());
+
+        exception.Message.Should().Contain("Node key rejected");
+    }
+
+    [Fact]
+    public async Task SendHelloAsync_BothNodesHaveNoKey_AllowsCommunication()
+    {
+        var protocolServer = new Protocol(new UnusedReceiver(), "Server", null, () => ThisStatus.LoadingData);
+        var server = new Server(11035, false, null, protocolServer.AuthenticatedMessageHandler);
+        await TestHelpers.WaitForServerToStartAsync(server);
+
+        var protocolClient = new Protocol("localhost", 11035, 3, TimeSpan.FromSeconds(2), false, null, "Client", null);
+
+        await protocolClient.SendHelloAsync();
+        var networkStat = await protocolClient.SendPingAsync();
+
+        networkStat.LastStatus.Should().Be(NetworkStatus.LoadingData);
+    }
+
+    [Fact]
+    public async Task SendSystemMessage_WithoutCompressionOrEncryption_ReturnsMatchingHash()
     {
         var protocolServer = new Protocol(new UnusedReceiver());
 
@@ -67,7 +154,7 @@ public class ProtocolTest
     }
 
     [Fact]
-    public async Task SendSystemMessage_Compression_OkHash()
+    public async Task SendSystemMessage_WithCompression_ReturnsMatchingHash()
     {
         var protocolServer = new Protocol(new UnusedReceiver());
 
@@ -86,7 +173,7 @@ public class ProtocolTest
     }
 
     [Fact]
-    public async Task SendSystemMessage_MismatchedCompressionA_Exception()
+    public async Task SendSystemMessage_ServerCompressedClientUncompressed_ThrowsException()
     {
         var protocolServer = new Protocol(new UnusedReceiver());
 
@@ -102,7 +189,7 @@ public class ProtocolTest
         exception.Message.Should().Contain("Failed to decompress message.");
     }
     [Fact]
-    public async Task SendSystemMessage_MismatchedCompressionB_Exception()
+    public async Task SendSystemMessage_ClientCompressedServerUncompressed_ThrowsException()
     {
         var protocolServer = new Protocol(new UnusedReceiver());
         
@@ -120,7 +207,7 @@ public class ProtocolTest
     }
 
     [Fact]
-    public async Task SendSystemMessage_Encryption_OkHash()
+    public async Task SendSystemMessage_WithEncryption_ReturnsMatchingHash()
     {
         var protocolServer = new Protocol(new UnusedReceiver());
 
@@ -136,7 +223,7 @@ public class ProtocolTest
         response.Should().Be(DistributedCollections.Helpers.Helper.Hash(Encoding.UTF8.GetBytes(message)).ToString());
     }
     [Fact]
-    public async Task SendSystemMessage_EncryptionSecondaryPassword_OkHash()
+    public async Task SendSystemMessage_WithSecondaryEncryptionKey_ReturnsMatchingHash()
     {
         var protocolServer = new Protocol(new UnusedReceiver());
 
@@ -152,7 +239,7 @@ public class ProtocolTest
         response.Should().Be(DistributedCollections.Helpers.Helper.Hash(Encoding.UTF8.GetBytes(message)).ToString());
     }
     [Fact]
-    public async Task SendSystemMessage_EncryptionWrongPassword_Exception()
+    public async Task SendSystemMessage_WithWrongEncryptionKey_ThrowsException()
     {
         var protocolServer = new Protocol(new UnusedReceiver());
 

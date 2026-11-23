@@ -83,7 +83,7 @@ internal class Client : IDisposable
                     Disconnect();
 
                     if (i == _retryCount - 1)
-                        throw;
+                        throw new TimeoutException("The remote node could not be reached.", ex);
 
                     await Task.Delay((i + 1) * 100, cancellationToken);
                 }

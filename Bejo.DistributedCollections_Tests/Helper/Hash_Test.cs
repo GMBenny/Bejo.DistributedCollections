@@ -2,10 +2,10 @@ using FluentAssertions;
 
 namespace Bejo.DistributedCollections_Tests;
 
-public class Helper_Hash
+public class HashTest
 {
     [Fact]
-    public void Hashtest_3000000Random()
+    public void Hash_ThreeMillionUniqueInputs_AllHashesUniqueAndEvenlyDistributed()
     {
         var uniqueData = GetRandomUniqueByteArrays(3_000_000, 6); 
 

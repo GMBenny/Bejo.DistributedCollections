@@ -1,3 +1,11 @@
 ﻿namespace Bejo.DistributedCollections;
 
-public enum ThisStatus { Starting, Started, Stopped, Faulted }
+public enum ThisStatus
+{
+    Starting,
+    LoadingData,
+    SyncingData,
+    Online,
+    Faulted,
+    Stopped
+}

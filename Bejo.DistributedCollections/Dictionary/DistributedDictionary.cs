@@ -58,10 +58,7 @@ public class DistributedDictionary<TKey, TValue> : IDictionary<TKey, TValue>, ID
         return _node.TryGetValue(item.Key, out var value) && EqualityComparer<TValue>.Default.Equals(value, item.Value);
     }
 
-    public bool ContainsKey(TKey key)
-    {
-        return _node.TryGetValue(key, out _);
-    }
+    public bool ContainsKey(TKey key) => _node.TryGetValue(key, out _);
 
     public void CopyTo(KeyValuePair<TKey, TValue>[] array, int arrayIndex)
     {
@@ -69,7 +66,7 @@ public class DistributedDictionary<TKey, TValue> : IDictionary<TKey, TValue>, ID
         if (arrayIndex < 0)
             throw new ArgumentOutOfRangeException(nameof(arrayIndex));
 
-        var items = _node.GetSnapshot();
+        var items = _node.GetSnapshot;
         if (array.Length - arrayIndex < items.Length)
             throw new ArgumentException("The destination array does not have enough space.", nameof(array));
 
@@ -78,7 +75,7 @@ public class DistributedDictionary<TKey, TValue> : IDictionary<TKey, TValue>, ID
 
     public IDictionary<TKey, TValue> GetDictionary()
     {
-        return new Dictionary<TKey, TValue>(_node.GetSnapshot());
+        return new Dictionary<TKey, TValue>(_node.GetSnapshot);
     }
 
     public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator()
