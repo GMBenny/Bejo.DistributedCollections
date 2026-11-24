@@ -20,6 +20,7 @@ public class ReplicationSet : ICommandReceiver, ISyncReceiver, IMembershipReceiv
     private readonly object _statusLock = new();
     private ThisStatus _thisStatus = ThisStatus.Starting;
     private readonly List<ThisStatus> _statusHistory = new() { ThisStatus.Starting };
+    private readonly Task _readyTask;
 
     // Manages server and client communication for replication
     private readonly ReplicationManager _replicationManager;
@@ -68,9 +69,12 @@ public class ReplicationSet : ICommandReceiver, ISyncReceiver, IMembershipReceiv
 
         // If there are no other nodes in the replication set
         if (replicationSetSettings.nodes.Length == 0) // set the local status to Online;
+        {
             SetLocalStatus(ThisStatus.Online);
+            _readyTask = Task.CompletedTask;
+        }
         else
-            _ = CompleteInitialSynchronizationAsync(); // otherwise, start the initial synchronization process
+            _readyTask = CompleteInitialSynchronizationAsync(); // otherwise, start the initial synchronization process
     }
     private async Task CompleteInitialSynchronizationAsync()
     {
@@ -114,6 +118,15 @@ public class ReplicationSet : ICommandReceiver, ISyncReceiver, IMembershipReceiv
         }
 
         return new ReplicationSetStatus(_replicationSetSettings.nodeName, localStatus, _replicationManager?.GetNetworkStats ?? Array.Empty<NetworkStat>(), _replicationManager?.ServerState == Server.ServerState.Started);
+    }
+
+    public async Task WaitUntilReadyAsync(CancellationToken cancellationToken = default)
+    {
+        await _readyTask.WaitAsync(cancellationToken);
+
+        var status = GetLocalStatus();
+        if (status != ThisStatus.Online)
+            throw new InvalidOperationException($"Replication set '{_replicationSetSettings.nodeName}' failed to become ready. Current status: {status}.");
     }
 
     internal void SetLocalStatus(ThisStatus status)
@@ -302,7 +315,7 @@ public class ReplicationSet : ICommandReceiver, ISyncReceiver, IMembershipReceiv
 
     private CollectionInfo CreateDictionary<TKey, TValue>(string name, HandleConflict<TKey, TValue> handleConflict, string recreateCollectionMetadata) where TKey : notnull
     {
-        var node = new DistributedDictionaryNode<TKey, TValue>(name, _replicationSetSettings.persistPath, _commandSender, handleConflict);
+        var node = new DistributedDictionaryNode<TKey, TValue>(name, _replicationSetSettings.persistPath, _commandSender, handleConflict, () => GetLocalStatus() == ThisStatus.Online);
         var dictionary = new DistributedDictionary<TKey, TValue>(node);
         return new CollectionInfo("DistributedDictionary", dictionary, node, recreateCollectionMetadata);
     }

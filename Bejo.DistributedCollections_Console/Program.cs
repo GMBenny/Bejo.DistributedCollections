@@ -3,40 +3,35 @@
 // Lav cluster
 var rs__1 = new ReplicationSet(new("rs__1", 11001, false, null,
     [new("localhost", 11002, TimeSpan.FromSeconds(2))],
-    3, TimeSpan.FromSeconds(2), "C:\\Benny\\PrivateProjekter\\Bejo.DistributedCollections\\Data\\RS1", null));
+    3, TimeSpan.FromSeconds(2)));
 
 var rs__2 = new ReplicationSet(new("rs__2", 11002, false, null,
     [new("localhost", 11001, TimeSpan.FromSeconds(2))],
-    3, TimeSpan.FromSeconds(2), "C:\\Benny\\PrivateProjekter\\Bejo.DistributedCollections\\Data\\RS2", null));
+    3, TimeSpan.FromSeconds(2)));
 
 // Add data til node 1
 var d__1 = rs__1.GetOrCreateDistributedDictionary<string, string>("test", (k, v1, v2) => v1.Value);
-d__1.Add("key1 *", "value1 *");
-
-await Task.Delay(500);
-
-// Luk node 1
-await rs__1.LeaveAsync();
-rs__1 = null;
-
-await Task.Delay(500);
-
-// tilføj data til node 2
 var d__2 = rs__2.GetOrCreateDistributedDictionary<string, string>("test", (k, v1, v2) => v1.Value);
-d__2.Add("key2 *", "value 2 *");
+
+d__1.Add("key1", "value1");
 
 await Task.Delay(500);
 
-// Genopret node 1 med samme navn og fil folder
-var rs___1 = new ReplicationSet(new("rs__1", 11003, false, null,
-    [new("localhost", 11002, TimeSpan.FromSeconds(2))],
-    3, TimeSpan.FromSeconds(2), "C:\\Benny\\PrivateProjekter\\Bejo.DistributedCollections\\Data\\RS1", null));
-var d___1 = rs___1.GetOrCreateDistributedDictionary<string, string>("test", (k, v1, v2) => v1.Value);
+
+d__1.Add("key1", "vAlue1");
+d__2.Add("key1", "Value1");
+
+foreach (var item in d__2)
+{
+    Console.WriteLine($"På new RS2: {item.Key} - {item.Value}");
+}
+
+d__2.Remove("key1 *");
 
 await Task.Delay(500);
 
 // loop igennem værdierne - 1 kommer fra originalen og er gemt i fil, mens 2 kun kan komme fra sync
-foreach (var item in d___1)
+foreach (var item in d__1)
 {
     Console.WriteLine($"På new RS1: {item.Key} - {item.Value}");
 }
@@ -45,21 +40,6 @@ foreach (var item in d___1)
 
 
 await Task.Delay(250000);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
