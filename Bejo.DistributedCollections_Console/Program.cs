@@ -1,88 +1,119 @@
 ﻿using Bejo.DistributedCollections;
 
+// Lav cluster
+var rs__1 = new ReplicationSet(new("rs__1", 11001, false, null,
+    [new("localhost", 11002, TimeSpan.FromSeconds(2))],
+    3, TimeSpan.FromSeconds(2)));
+
+var rs__2 = new ReplicationSet(new("rs__2", 11002, false, null,
+    [new("localhost", 11001, TimeSpan.FromSeconds(2))],
+    3, TimeSpan.FromSeconds(2)));
+
+// Add data til node 1
+var d__1 = rs__1.GetOrCreateDistributedDictionary<string, string>("test", (k, v1, v2) => v1.Value);
+var d__2 = rs__2.GetOrCreateDistributedDictionary<string, string>("test", (k, v1, v2) => v1.Value);
+
+d__1.Add("key1", "value1");
+
+await Task.Delay(500);
+
+
+d__1.Add("key1", "vAlue1");
+d__2.Add("key1", "Value1");
+
+foreach (var item in d__2)
+{
+    Console.WriteLine($"På new RS2: {item.Key} - {item.Value}");
+}
+
+d__2.Remove("key1 *");
+
+await Task.Delay(500);
+
+// loop igennem værdierne - 1 kommer fra originalen og er gemt i fil, mens 2 kun kan komme fra sync
+foreach (var item in d__1)
+{
+    Console.WriteLine($"På new RS1: {item.Key} - {item.Value}");
+}
+
+
+
+
+await Task.Delay(250000);
+
+
+
+
+
 
 Console.WriteLine("Starting 2 replication sets...");
 
-var rs1 = new ReplicationSet(new ("rs1", 10001,true,["abc123abc"],
+var rs1 = new ReplicationSet(new ("rs1", 10001,false, null,
     [new("localhost", 10002, TimeSpan.FromSeconds(2))],
-    3,TimeSpan.FromSeconds(2), "C:\\Benny\\PrivateProjekter\\Bejo.DistributedCollections\\Data\\RS1\\"));
-var rs2 = new ReplicationSet(new ("rs2", 10002, true, ["abc123abc"], 
+    3,TimeSpan.FromSeconds(2), null, "aaa111"));
+
+var rs2 = new ReplicationSet(new ("rs2", 10002, false, null,
     [new("localhost", 10001, TimeSpan.FromSeconds(2))], 
-    3, TimeSpan.FromSeconds(2), "C:\\Benny\\PrivateProjekter\\Bejo.DistributedCollections\\Data\\RS2\\"));
+    3, TimeSpan.FromSeconds(2), null, "aaa111"));
 
 do
 {
-    await Task.Delay(25);
-} while (new[] { rs1, rs2 }.Any(rs => !rs.GetReplicationSetStatus().ServerStarted));
+    await Task.Delay(500);
+} while (rs1.GetReplicationSetStatus().ThisStatus != ThisStatus.Online &&
+         rs2.GetReplicationSetStatus().ThisStatus != ThisStatus.Online);
 
-var d1 = rs1.GetOrCreateDistributedDictionary<int, string>("myDictionary", (k, a, b) => a.CreatedTimestamp < b.CreatedTimestamp ? a.Value : b.Value);
-var d2 = rs2.GetOrCreateDistributedDictionary<int, string>("myDictionary", (k, a, b) => a.CreatedTimestamp < b.CreatedTimestamp ? a.Value : b.Value);
+Console.WriteLine("Replication sets are online.");
 
-await Task.Delay(1000);
+var d1 = rs1.GetOrCreateDistributedDictionary<string, string>("test", (k, v1, v2) => v1.Value);
 
-foreach (var kvp in d1) 
-{
-    Console.WriteLine($"d1: Key: {kvp.Key}, Value: {kvp.Value}");
-}
-foreach (var kvp in d2)
-{
-    Console.WriteLine($"d2: Key: {kvp.Key}, Value: {kvp.Value}");
-}
+Console.WriteLine("Adding key1 to rs1/d1 with value 'Value 1 fra rs1/d1'");
 
-d1.Add(1, "one");
-d2.Add(2, "TWO");
-d1.Add(3, "three");
-d2.Add(4, "FOUR");
+d1.TryAdd("key1", "Value 1 fra rs1/d1");
 
+Console.WriteLine("Starting 1 replication set...");
 
-await Task.Delay(1000);
-
-Console.WriteLine("All collections in rs1: " + string.Join(", ", rs1.GetAllCollections().Select(c => $"{c.Name} ({c.CollectionType})")));
-Console.WriteLine("All collections in rs2: " + string.Join(", ", rs2.GetAllCollections().Select(c => $"{c.Name} ({c.CollectionType})")));
-
-foreach (var kvp in d1)
-{
-    Console.WriteLine($"d1: Key: {kvp.Key}, Value: {kvp.Value}");
-}
-
-await Task.Delay(100000);
-
-Console.WriteLine("Press any key to exit...");
-Console.ReadKey();
-
-
-
-
-
-/*
-Console.WriteLine("Starting server...");
-
-var s = new Server(12345, true, new List<string>{ "abc123abc", "123454321"}, message => message.Reverse().ToArray());
-
-Task.Run(async () => await s.StartAsync());
-//await s.StartAsync(); // Blocking kald
-
-Console.WriteLine("Server starting...");
+var rs3 = new ReplicationSet(new("rs3", 10003, false, null,
+    [new("localhost", 10001, TimeSpan.FromSeconds(2))],
+    3, TimeSpan.FromSeconds(2), null, "aaa111"));
 
 do
 {
-    Console.WriteLine($"Server state: {s.State}");
-    await Task.Delay(1000);
-} while (s.State != Server.ServerState.started);
+    await Task.Delay(500);
+} while (rs1.GetReplicationSetStatus().ThisStatus != ThisStatus.Online &&
+         rs2.GetReplicationSetStatus().ThisStatus != ThisStatus.Online &&
+         rs3.GetReplicationSetStatus().ThisStatus != ThisStatus.Online);
 
-Console.WriteLine("Server started.");
+Console.WriteLine("Replication set rs3 is online.");
 
-var c = new Client("localhost", 12345, 3, new TimeSpan(0, 0, 2), true, "123454321");
+var d3 = rs3.GetOrCreateDistributedDictionary<string, string>("test", (k, v1, v2) => v1.Value);
 
-for(int i = 0; i < 4; i++)
+Console.WriteLine("Trying to get key1 from new replication set");
+
+if (d3.TryGetValue("key1", out var value))
 {
-    var r = await c.SendAsync(System.Text.Encoding.UTF8.GetBytes($"{i}:{5-i}"));
-    Console.WriteLine("Response: " + System.Text.Encoding.UTF8.GetString(r));
+    Console.WriteLine($"Value from rs3/d3: {value}");
+}
+else
+{
+    Console.WriteLine("Key not found in rs3/d3");
+}
+
+Console.WriteLine($"Status for rs1: {rs1.GetReplicationSetStatus().ThisStatus} | {string.Join(" - ", rs1.GetReplicationSetStatus().NetworkStats.Select(p=> p.NodeName + "," + p.LastStatus))}");
+Console.WriteLine($"Status for rs2: {rs2.GetReplicationSetStatus().ThisStatus} | {string.Join(" - ", rs2.GetReplicationSetStatus().NetworkStats.Select(p=> p.NodeName + "," + p.LastStatus))}");
+Console.WriteLine($"Status for rs3: {rs3.GetReplicationSetStatus().ThisStatus} | {string.Join(" - ", rs3.GetReplicationSetStatus().NetworkStats.Select(p=> p.NodeName + "," + p.LastStatus))}");
+
+//Console.WriteLine("Stopping replication sets...");
+//await rs2.LeaveAsync();
+
+
+for (int i = 0; i < 1000; i++)
+{
+    Console.WriteLine($"Status for rs1: {rs1.GetReplicationSetStatus().ThisStatus} | {string.Join(" - ", rs1.GetReplicationSetStatus().NetworkStats.Select(p => p.NodeName + "," + p.LastStatus))}");
+    Console.WriteLine($"Status for rs2: {rs2.GetReplicationSetStatus().ThisStatus} | {string.Join(" - ", rs2.GetReplicationSetStatus().NetworkStats.Select(p => p.NodeName + "," + p.LastStatus))}");
+    Console.WriteLine($"Status for rs3: {rs3.GetReplicationSetStatus().ThisStatus} | {string.Join(" - ", rs3.GetReplicationSetStatus().NetworkStats.Select(p => p.NodeName + "," + p.LastStatus))}");
+
+    await Task.Delay(2500);
 }
 
 
-
-
-Console.WriteLine("End");
-Console.ReadKey();
-*/
+await Task.Delay(250000);

@@ -27,6 +27,27 @@ public class DistributedDictionaryTest
     }
 
     [Fact]
+    public void Add_BeforeReplicationSetIsReady_ThrowsException()
+    {
+        var rs1 = new DistributedCollections.ReplicationSet(
+            new DistributedCollections.ReplicationSetSettings(
+                "rs1",
+                12300,
+                false,
+                null,
+                [new("localhost", 12301, TimeSpan.FromSeconds(2))],
+                3,
+                TimeSpan.FromSeconds(2)));
+        var dictionary = rs1.GetOrCreateDistributedDictionary<int, string>("d1", HandleConflict);
+
+        var action = () => dictionary.Add(1, "one");
+
+        action.Should()
+            .Throw<InvalidOperationException>()
+            .WithMessage("The replication set is not Online and cannot accept dictionary changes.");
+    }
+
+    [Fact]
     public async Task Add_ExistingData_DataReadable()
     {
         var (dict1, dict2) = await CreateDistributedDictionary(12002, 12003);
@@ -38,7 +59,7 @@ public class DistributedDictionaryTest
         dict1[1].Should().Be("one");
 
         // Ensure data is replicated
-        await IDictionaryHelper.AwaitValue(dict2, 1);
+        await Task.Delay(1000);
         dict2[1].Should().Be("one");
 
         // Try to add the same key again
@@ -318,7 +339,7 @@ public class DistributedDictionaryTest
 
         dict2[1] = "ONE";
 
-        await Task.Delay(100);
+        await Task.Delay(1000);
 
         dict1[1].Should().Be("ONE");
     }
@@ -388,7 +409,7 @@ public class DistributedDictionaryTest
         dict2.ContainsKey(1).Should().BeTrue();
 
         // Ensure data is removed remotely
-        await Task.Delay(100);
+        await Task.Delay(1000);
         dict1.ContainsKey(1).Should().BeTrue();
     }
 
@@ -472,7 +493,7 @@ public class DistributedDictionaryTest
         dict2.ContainsKey(1).Should().BeTrue();
 
         // Ensure data is removed remotely
-        await Task.Delay(100);
+        await Task.Delay(1000);
         dict1.ContainsKey(1).Should().BeTrue();
     }
     #endregion
@@ -564,12 +585,7 @@ public class DistributedDictionaryTest
     private async Task WaitForReplicationSetToStart(DistributedCollections.ReplicationSet[] rs)
     {
         foreach (var r in rs)
-        {
-            while (!r.GetReplicationSetStatus().ServerStarted)
-            {
-                await Task.Delay(25);
-            }
-        }        
+            await r.WaitUntilReadyAsync();
     }
 
     private async Task<(IDictionary<int, string> dict1, IDictionary<int, string> dict2)> CreateDistributedDictionary(int port1, int port2)

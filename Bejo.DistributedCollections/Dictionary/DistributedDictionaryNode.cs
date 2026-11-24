@@ -5,11 +5,18 @@ using System.Text.Json;
 
 namespace Bejo.DistributedCollections.Dictionary;
 
-internal class DistributedDictionaryNode<TKey, TValue>(string name, string? persistPath, ICommandSender commandSender, ReplicationSet.HandleConflict<TKey, TValue> handleConflict) : IDistributedCollectionNode where TKey : notnull
+internal class DistributedDictionaryNode<TKey, TValue>(
+    string name,
+    string? persistPath,
+    ICommandSender commandSender,
+    ReplicationSet.HandleConflict<TKey, TValue> handleConflict,
+    Func<bool>? canMutate = null) : IDistributedCollectionNode where TKey : notnull
 {
     private ConcurrentDictionary<TKey, LocalStorage<TKey, TValue>> _dictionaryReplica = new();
 
     private ReplicationSet.HandleConflict<TKey, TValue> _handleConflict = handleConflict;
+
+    private readonly Func<bool> _canMutate = canMutate ?? (() => true);
 
     internal ICollection<TKey> Keys => _dictionaryReplica.Keys;
 
@@ -33,6 +40,8 @@ internal class DistributedDictionaryNode<TKey, TValue>(string name, string? pers
 
     internal bool TryAdd(TKey key, TValue value)
     {
+        EnsureCanMutate();
+
         var localValue = new LocalStorage<TKey, TValue>(key, value);
         if (!_dictionaryReplica.TryAdd(key, localValue))
             return false;
@@ -45,6 +54,8 @@ internal class DistributedDictionaryNode<TKey, TValue>(string name, string? pers
 
     internal bool TryCreateUpdate(TKey key, TValue value)
     {
+        EnsureCanMutate();
+
         var localValue = new LocalStorage<TKey, TValue>(key, value);
 
         // If the key already exists, we update it and send a replication command
@@ -87,6 +98,8 @@ internal class DistributedDictionaryNode<TKey, TValue>(string name, string? pers
 
     internal bool Remove(TKey key)
     {
+        EnsureCanMutate();
+
         var removeResult = _dictionaryReplica.TryRemove(key, out var removedValue);
 
         // If local change was a success, then replicate the change.
@@ -101,10 +114,18 @@ internal class DistributedDictionaryNode<TKey, TValue>(string name, string? pers
 
     internal void Clear()
     {
+        EnsureCanMutate();
+
         _dictionaryReplica.Clear();
         PersistDataToFile();
 
         commandSender.SendCommand(new CommandDTO(name, string.Empty, ChangeType.ClearCollection, 0, 0));
+    }
+
+    private void EnsureCanMutate()
+    {
+        if (!_canMutate())
+            throw new InvalidOperationException("The replication set is not Online and cannot accept dictionary changes.");
     }
 
 
